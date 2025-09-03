@@ -103,10 +103,10 @@ function TopBar({
   );
 }
 
-function Card({ note, onOpen, onClickTag }: { note: Note; onOpen: () => void; onClickTag: (t: string) => void; }) {
-  const bodyPreview = note.body.split(/\\r\\n|\\n|\\r|\\u2028|\\u2029/).slice(0, 6).join('\\n');
+function ReadCard({ note, onEdit, onClickTag }: { note: Note; onEdit: () => void; onClickTag: (t: string) => void; }) {
+  const bodyPreview = note.body.split(/\r\n|\n|\r|\u2028|\u2029/).join('\n');
   return (
-    <div className="card" onClick={onOpen}>
+    <div className="card">
       {note.image && <img src={note.image} alt="" />}
       <h3>{note.title || '(uten tittel)'}</h3>
       <p>{bodyPreview}</p>
@@ -117,34 +117,39 @@ function Card({ note, onOpen, onClickTag }: { note: Note; onOpen: () => void; on
           </span>
         ))}
       </div>
+      <div className="edit-actions">
+        <button className="ghost" onClick={onEdit}>Rediger</button>
+        <span className="small">Oppdatert: {new Date(note.updatedAt || note.createdAt).toLocaleString()}</span>
+      </div>
     </div>
   );
 }
 
-function Draft({
+function EditCard({
   note,
-  onClose,
   onSave,
-  onDelete
+  onDelete,
+  onCancel
 }: {
   note: Note;
-  onClose: () => void;
   onSave: (n: Note) => void;
   onDelete: (id: string) => void;
+  onCancel: () => void;
 }) {
   const [body, setBody] = useState(note.body);
   const [tags, setTags] = useState<string[]>(note.tags);
   const [tagInput, setTagInput] = useState('');
   const [image, setImage] = useState<string | undefined>(note.image);
+  const textRef = useRef<HTMLTextAreaElement | null>(null);
+  const [selectedWord, setSelectedWord] = useState<string | null>(null);
+  const [cursorWord, setCursorWord] = useState<string | null>(null);
 
   useEffect(() => { setBody(note.body); setTags(note.tags); setImage(note.image); }, [note.id]);
 
   const title = useMemo(() => computedTitleFromBody(body), [body]);
 
-  const allTags = useMemo(() => Array.from(new Set((note.tags.concat(tags)))) , [note.tags, tags]);
-
+  // All tags in storage (for suggestions)
   const candidateTags = useMemo(() => {
-    // From *all* tags in storage (from other notes)
     const all = new Set<string>();
     try {
       const raw = localStorage.getItem('storm_notes');
@@ -156,36 +161,21 @@ function Draft({
     return Array.from(all).filter(t => !tags.includes(t));
   }, [tags]);
 
-  const suggestions = useMemo(() => {
-    const q = tagInput.trim().toLowerCase();
-    // Score: freq + 3×co-occurrence + prefix boost + contains boost
-    const freq: Record<string, number> = {};
+  // Frequency map
+  const freq: Record<string, number> = useMemo(() => {
+    const f: Record<string, number> = {};
     try {
       const raw = localStorage.getItem('storm_notes');
       if (raw) {
         const arr = JSON.parse(raw) as Note[];
-        for (const n of arr) for (const t of n.tags) freq[t] = (freq[t] || 0) + 1;
+        for (const n of arr) for (const t of n.tags) f[t] = (f[t] || 0) + 1;
       }
     } catch {}
+    return f;
+  }, []);
 
-    const co: Record<string, number> = {};
-    for (const t of candidateTags) {
-      let c = 0;
-      for (const exist of tags) { if (t === exist) continue; if (exist && t) c += 1; }
-      co[t] = c; // simple co-occurrence proxy
-    }
-
-    const score = (t: string) => {
-      const base = (freq[t] || 0) + 3 * (co[t] || 0);
-      const str = t.toLowerCase();
-      const prefix = q && str.startsWith(q) ? 2 : 0;
-      const contains = q && str.includes(q) ? 0.5 : 0;
-      return base + prefix + contains;
-    };
-
-    const pool = q ? candidateTags.filter(t => t.toLowerCase().includes(q)) : candidateTags;
-    return pool.sort((a, b) => score(b) - score(a)).slice(0, 10);
-  }, [candidateTags, tags, tagInput]);
+  // Simple co-occurrence proxy to current tags
+  const coScore = (t: string) => tags.reduce((s, ex) => s + (ex && t ? 1 : 0), 0);
 
   function addTag(t: string) {
     const clean = t.trim(); if (!clean) return;
@@ -193,7 +183,6 @@ function Draft({
     setTags([...tags, clean]);
     setTagInput('');
   }
-
   function removeTag(t: string) { setTags(tags.filter(x => x !== t)); }
 
   function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -201,9 +190,8 @@ function Draft({
     if (!f) return;
     const reader = new FileReader();
     reader.onload = () => { setImage(String(reader.result)); };
-    reader.onerror = () => { /* ignore */ };
+    reader.onerror = () => {};
     reader.readAsDataURL(f);
-    // clear input
     e.target.value = '';
   }
 
@@ -211,55 +199,111 @@ function Draft({
     onSave({ ...note, body, title, tags, image, updatedAt: Date.now() });
   }
 
+  // Extract word at cursor
+  function getWordAt(text: string, pos: number) {
+    const left = text.slice(0, pos);
+    const right = text.slice(pos);
+    const leftMatch = left.match(/[\p{L}\p{N}_-]+$/u);
+    const rightMatch = right.match(/^[\p{L}\p{N}_-]+/u);
+    const word = ((leftMatch?.[0] || '') + (rightMatch?.[0] || '')) || '';
+    return word.trim();
+  }
+
+  function handleSelectOrInput() {
+    const ta = textRef.current;
+    if (!ta) return;
+    const start = ta.selectionStart ?? 0;
+    const end = ta.selectionEnd ?? 0;
+    if (end > start) {
+      const sel = ta.value.slice(start, end).trim();
+      const clean = sel.replace(/^[#]+/, '').slice(0, 40);
+      setSelectedWord(clean || null);
+    } else {
+      setSelectedWord(null);
+      const w = getWordAt(ta.value, start);
+      setCursorWord(w || null);
+    }
+  }
+
+  // Suggestions from tagInput box (explicit) + contextual based on cursorWord
+  const inputSuggestions = useMemo(() => {
+    const q = tagInput.trim().toLowerCase();
+    if (!q) return [] as string[];
+    const score = (t: string) => (freq[t] || 0) + 3 * coScore(t) + (t.toLowerCase().startsWith(q) ? 2 : (t.toLowerCase().includes(q) ? 0.5 : 0));
+    const pool = candidateTags.filter(t => t.toLowerCase().includes(q));
+    return pool.sort((a,b)=> score(b)-score(a)).slice(0, 10);
+  }, [tagInput, candidateTags, freq, tags]);
+
+  const contextualSuggestions = useMemo(() => {
+    const w = (cursorWord || '').toLowerCase();
+    if (!w || w.length < 2) return [] as string[];
+    const score = (t: string) => (freq[t] || 0) + 2 * coScore(t) + (t.toLowerCase().startsWith(w) ? 2 : (t.toLowerCase().includes(w) ? 0.5 : 0));
+    const pool = candidateTags.filter(t => t.toLowerCase().includes(w));
+    return pool.sort((a,b)=> score(b)-score(a)).slice(0, 8);
+  }, [cursorWord, candidateTags, freq, tags]);
+
   return (
-    <div className="modal" onClick={onClose}>
-      <div className="sheet" onClick={(e) => e.stopPropagation()}>
-        <div className="row">
-          <textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder="Skriv notat…" />
+    <div className="editcard">
+      {image && <img src={image} alt="" />}
+      <div className="small">Tittel (auto):</div>
+      <div style={{ fontWeight: 700, marginTop: 4 }}>{title || '(uten tittel)'}</div>
+
+      <textarea
+        ref={textRef}
+        value={body}
+        onChange={(e) => { setBody(e.target.value); handleSelectOrInput(); }}
+        onSelect={handleSelectOrInput}
+        onKeyUp={handleSelectOrInput}
+        placeholder="Skriv notat…"
+        style={{ width: '100%', minHeight: 160, padding: 10, borderRadius: 10 }}
+      />
+
+      {/* Quick action when selecting a word */}
+      {selectedWord && selectedWord.length > 0 && (
+        <div className="suggestion-bar">
+          <button className="suggestion-pill" onClick={() => { addTag(selectedWord); setSelectedWord(null); }}>Legg til tagg: {selectedWord}</button>
         </div>
-        <div className="row">
-          <div style={{ flex: 1 }}>
-            <div className="small">Tittel (auto):</div>
-            <div style={{ fontWeight: 700, marginTop: 4 }}>{title || '(uten tittel)'}</div>
-            <hr className="hr" />
-            <div className="small">Tagger</div>
-            <div className="tag-suggestion-list">
-              {tags.map(t => (
-                <TagPill key={t} tag={t} onRemove={() => removeTag(t)} />
-              ))}
-            </div>
-            <div className="row" style={{ marginTop: 6 }}>
-              <input className="input" placeholder="Legg til tagg…" value={tagInput}
-                onChange={(e) => setTagInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') addTag(tagInput); }} />
-              <button className="ghost" onClick={() => addTag(tagInput)}>Legg til</button>
-            </div>
-            {suggestions.length > 0 && (
-              <div className="tag-suggestion-list">
-                {suggestions.map(t => (
-                  <TagPill key={t} tag={t} onClick={() => addTag(t)} />
-                ))}
-              </div>
-            )}
-          </div>
-          <div style={{ width: 260 }}>
-            <div className="small">Bilde</div>
-            {image ? (
-              <img src={image} alt="" />
-            ) : (
-              <div className="small" style={{ opacity: .8 }}>Ingen bilde valgt</div>
-            )}
-            <div className="row" style={{ marginTop: 8 }}>
-              <input id="filepick" type="file" accept="image/*" onChange={onPickFile} />
-            </div>
-          </div>
+      )}
+
+      {/* Contextual suggestions while typing */}
+      {contextualSuggestions.length > 0 && (
+        <div className="suggestion-bar">
+          {contextualSuggestions.map(t => (
+            <button key={t} className="suggestion-pill" onClick={() => addTag(t)}>#{t}</button>
+          ))}
         </div>
-        <div className="actions">
-          <button className="ghost" onClick={() => onDelete(note.id)}>Slett</button>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button className="ghost" onClick={onClose}>Lukk</button>
-            <button className="primary" onClick={persist}>Lagre</button>
-          </div>
+      )}
+
+      <div className="small">Tagger</div>
+      <div className="tag-suggestion-list">
+        {tags.map(t => (
+          <TagPill key={t} tag={t} onRemove={() => removeTag(t)} />
+        ))}
+      </div>
+
+      <div className="row" style={{ marginTop: 6 }}>
+        <input className="input" placeholder="Legg til tagg…" value={tagInput}
+          onChange={(e) => setTagInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') addTag(tagInput); }} />
+        <button className="ghost" onClick={() => addTag(tagInput)}>Legg til</button>
+      </div>
+      {inputSuggestions.length > 0 && (
+        <div className="tag-suggestion-list">
+          {inputSuggestions.map(t => (
+            <TagPill key={t} tag={t} onClick={() => addTag(t)} />
+          ))}
+        </div>
+      )}
+
+      <div className="row" style={{ marginTop: 8 }}>
+        <input id="filepick" type="file" accept="image/*" onChange={onPickFile} />
+      </div>
+
+      <div className="edit-actions">
+        <button className="ghost" onClick={() => onDelete(note.id)}>Slett</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="ghost" onClick={onCancel}>Avbryt</button>
+          <button className="primary" onClick={persist}>Lagre</button>
         </div>
       </div>
     </div>
@@ -269,71 +313,68 @@ function Draft({
 export default function App() {
   const { notes, setNotes } = useNotes();
   const [selected, setSelected] = useState<string[]>([]);
-  const [draftId, setDraftId] = useState<string | null>(null);
-
-  const draft = useMemo(() => notes.find(n => n.id === draftId) || null, [draftId, notes]);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   const { direct, related } = useMemo(() => directAndRelatedNotes(notes, selected), [notes, selected]);
-  const visible = useMemo(() => {
-    if (selected.length === 0) return notes.slice().sort((a,b)=> (b.updatedAt||b.createdAt)-(a.updatedAt||a.createdAt));
-    const rel = related.map(x => x.note);
-    return [...direct, ...rel];
-  }, [notes, direct, related, selected]);
 
-  function openDraft(id: string) { setDraftId(id); }
+  // Feed order: oldest -> newest (newest at the bottom)
+  const baseOrder = useMemo(() => notes.slice().sort((a,b)=> (a.updatedAt||a.createdAt)-(b.updatedAt||b.createdAt)), [notes]);
+
+  const visible = useMemo(() => {
+    if (selected.length === 0) return baseOrder;
+    const rel = related.map(x => x.note);
+    const ordered = [...direct, ...rel];
+    return ordered.sort((a,b)=> (a.updatedAt||a.createdAt)-(b.updatedAt||b.createdAt));
+  }, [baseOrder, direct, related, selected]);
 
   function addNote() {
     const now = Date.now();
-    const n: Note = {
-      id: uid(),
-      title: '',
-      body: '',
-      tags: selected.slice(),
-      createdAt: now,
-      updatedAt: now,
-    };
-    setNotes([n, ...notes]);
-    setDraftId(n.id);
+    const n: Note = { id: uid(), title: '', body: '', tags: selected.slice(), createdAt: now, updatedAt: now };
+    // push to the end (newest at bottom)
+    setNotes([...notes, n]);
+    setEditingId(n.id);
   }
 
   function saveNote(n: Note) {
     setNotes(notes.map(x => x.id === n.id ? n : x));
+    setEditingId(null);
   }
 
   function deleteNote(id: string) {
     setNotes(notes.filter(n => n.id !== id));
-    setDraftId(null);
+    setEditingId(null);
   }
 
   function addTagToDraft(t: string) {
-    if (!draft) return;
+    if (!editingId) return;
     const tag = t.trim(); if (!tag) return;
-    if (draft.tags.includes(tag)) return;
-    saveNote({ ...draft, tags: [...draft.tags, tag], updatedAt: Date.now() });
+    setNotes(notes.map(n => n.id === editingId && !n.tags.includes(tag) ? { ...n, tags: [...n.tags, tag], updatedAt: Date.now() } : n));
   }
 
   return (
     <div className="app">
-      <TopBar notes={notes} selected={selected} setSelected={setSelected} draftOpen={!!draft} onAddTagToDraft={addTagToDraft} />
+      <TopBar notes={notes} selected={selected} setSelected={setSelected} draftOpen={!!editingId} onAddTagToDraft={addTagToDraft} />
 
       <div className="container">
         {selected.length > 0 && (
           <div className="small" style={{ margin: '6px 0 12px' }}>
-            Direkte treff først. Deretter relaterte notater.
+            Direkte treff først. Deretter relaterte notater. (Nyeste nederst)
           </div>
         )}
         <div className="feed">
           {visible.map(n => (
-            <Card key={n.id} note={n} onOpen={() => openDraft(n.id)} onClickTag={(t) => setSelected(prev => prev.includes(t) ? prev : [...prev, t])} />
+            <div key={n.id}>
+              {editingId === n.id ? (
+                <EditCard note={n} onSave={saveNote} onDelete={deleteNote} onCancel={() => setEditingId(null)} />
+              ) : (
+                <ReadCard note={n} onEdit={() => setEditingId(n.id)} onClickTag={(t) => setSelected(prev => prev.includes(t) ? prev : [...prev, t])} />
+              )}
+            </div>
           ))}
         </div>
       </div>
 
       <button className="fab" title="Nytt notat" onClick={addNote}>+</button>
-
-      {draft && (
-        <Draft note={draft} onClose={() => setDraftId(null)} onSave={saveNote} onDelete={deleteNote} />
-      )}
     </div>
   );
 }

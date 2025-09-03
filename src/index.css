@@ -62,6 +62,7 @@ input, textarea { color: var(--text); background: #0b1220; border: 1px solid var
   box-shadow: 0 10px 30px rgba(0,0,0,.35);
 }
 
+/* (Tidligere modal beholdes for ev. gjenbruk; ikke i bruk nå) */
 .modal {
   position: fixed; inset: 0; z-index: 30; display: grid; place-items: center;
   background: rgba(0,0,0,.5);
