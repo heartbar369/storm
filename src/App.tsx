@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 
 // =====================
 // Storm – minimal, stabil versjon (TypeScript)
@@ -20,7 +20,7 @@ export interface Note {
 
 interface TagStat { count: number; lastUsed: number }
 
-// ---------- Felles linjeskift-regex (fikser "Unterminated regular expression") ----------
+// ---------- Felles linjeskift-regex (fikser tidligere regex-feil) ----------
 // Deler på CRLF (\r\n), LF (\n), CR (\r), samt Unicode LS (\u2028) og PS (\u2029)
 const SPLIT_RE = /\r\n|\n|\r|\u2028|\u2029/;
 
@@ -40,7 +40,7 @@ function bodyWithoutTitle(body: string): string {
   let i = 0;
   while (i < ls.length && ls[i].trim() === "") i++;
   if (i < ls.length) i++;
-  return ls.slice(i).join('\n');
+  return ls.slice(i).join("\n");
 }
 
 function unique<T>(arr: T[]): T[] { return Array.from(new Set(arr)); }
@@ -96,6 +96,50 @@ function getContrastTextColor(hex: string): string {
 }
 function tagFillColor(tag: string): string { return getTagColor(tag); }
 
+// Sørg for at tagg-bakgrunn har nok kontrast til HVIT tekst
+function hexToRgb(hex: string): { r: number; g: number; b: number } {
+  const h = hex.replace('#','');
+  const r = parseInt(h.slice(0,2),16);
+  const g = parseInt(h.slice(2,4),16);
+  const b = parseInt(h.slice(4,6),16);
+  return { r, g, b };
+}
+function rgbToHex(r: number, g: number, b: number): string {
+  const p = (x: number) => Math.max(0, Math.min(255, Math.round(x)));
+  return '#' + [p(r),p(g),p(b)].map(v=>v.toString(16).padStart(2,'0')).join('');
+}
+function relLumFromHex(hex: string): number {
+  try{
+    const {r,g,b} = hexToRgb(hex);
+    const a = [r,g,b].map(v=>{
+      const c = v/255;
+      return c <= 0.03928 ? c/12.92 : Math.pow((c+0.055)/1.055, 2.4);
+    });
+    return 0.2126*a[0] + 0.7152*a[1] + 0.0722*a[2];
+  }catch{ return 0; }
+}
+function contrastRatio(hex1: string, hex2: string): number {
+  const L1 = relLumFromHex(hex1);
+  const L2 = relLumFromHex(hex2);
+  const [hi, lo] = L1 >= L2 ? [L1, L2] : [L2, L1];
+  return (hi + 0.05) / (lo + 0.05);
+}
+function darkenHex(hex: string, factor = 0.88): string {
+  const {r,g,b} = hexToRgb(hex);
+  return rgbToHex(r*factor, g*factor, b*factor);
+}
+function ensureContrastBgForWhite(hex: string, min = 4.5): string {
+  let c = hex;
+  // Juster mot mørkere til kontrast mot hvit tekst er tilstrekkelig
+  let guard = 0;
+  while (contrastRatio(c, '#ffffff') < min && guard < 10) {
+    c = darkenHex(c, 0.86);
+    guard++;
+  }
+  return c;
+}
+function tagBgForWhite(tag: string): string { return ensureContrastBgForWhite(getTagColor(tag)); }
+
 // ---------- Tag-statistikk ----------
 function buildTagStats(notes: Note[]): Map<string, TagStat> {
   const stats = new Map<string, TagStat>();
@@ -108,6 +152,164 @@ function buildTagStats(notes: Note[]): Map<string, TagStat> {
     }
   }
   return stats;
+}
+
+// ---------- Tag -> Note index & diverse ranking ----------
+function buildTagNoteIndex(notes: Note[]): Map<string, Set<string>> {
+  const idx = new Map<string, Set<string>>();
+  for (const n of notes) {
+    for (const t of (n.tags || [])) {
+      if (!idx.has(t)) idx.set(t, new Set<string>());
+      idx.get(t)!.add(n.id);
+    }
+  }
+  return idx;
+}
+
+function jaccardTagSim(a: string, b: string, idx: Map<string, Set<string>>): number {
+  if (a === b) return 1;
+  const A = idx.get(a); const B = idx.get(b);
+  if (!A || !B || A.size === 0 || B.size === 0) return 0;
+  let inter = 0;
+  for (const x of A) if (B.has(x)) inter++;
+  const uni = A.size + B.size - inter;
+  return uni > 0 ? inter / uni : 0;
+}
+
+function rankDiverseTags(
+  candidates: string[],
+  baseScore: (t: string) => number,
+  sim: (a: string, b: string) => number,
+  lambda = 0.9,
+  limit?: number
+): string[] {
+  const rest = new Set(candidates);
+  const picked: string[] = [];
+  const lim = limit ?? candidates.length;
+  while (picked.length < lim && rest.size) {
+    let bestTag: string | null = null;
+    let bestVal = -Infinity;
+    for (const t of rest) {
+      const simMax = picked.length ? Math.max(...picked.map(p => sim(t, p))) : 0;
+      const val = baseScore(t) - lambda * simMax; // MMR
+      if (val > bestVal) { bestVal = val; bestTag = t; }
+    }
+    if (bestTag == null) break;
+    picked.push(bestTag);
+    rest.delete(bestTag);
+  }
+  return picked;
+}
+
+function smoothAdjacency(
+  order: string[],
+  sim: (a: string, b: string) => number,
+  locked = 0,
+  threshold = 0.8
+): string[] {
+  const arr = order.slice();
+  for (let i = Math.max(locked, 1); i < arr.length; i++) {
+    const left = arr[i - 1];
+    let j = i;
+    while (j < arr.length && sim(arr[j], left) > threshold) j++;
+    if (j < arr.length && j !== i) {
+      const [item] = arr.splice(j, 1);
+      arr.splice(i, 0, item);
+    }
+  }
+  return arr;
+}
+
+function computeTopBarOrder(
+  allTags: string[],
+  stats: Map<string, TagStat>,
+  idx: Map<string, Set<string>>,
+  selected: string[]
+): string[] {
+  if (allTags.length === 0) return [];
+
+  // base score = frequency + recency boost
+  const counts = allTags.map(t => stats.get(t)?.count || 0);
+  const maxC = Math.max(1, ...counts);
+  const lastVals = allTags.map(t => stats.get(t)?.lastUsed || 0);
+  const minL = Math.min(...lastVals);
+  const maxL = Math.max(minL + 1, ...lastVals);
+  const rec = (t: string) => (stats.get(t)?.lastUsed || 0);
+  const base = (t: string) =>
+    (stats.get(t)?.count || 0) / maxC + 0.2 * ((rec(t) - minL) / (maxL - minL));
+  const sim = (a: string, b: string) => jaccardTagSim(a, b, idx);
+
+  const selectedInAll = selected.filter(t => allTags.includes(t));
+  const pool = allTags.filter(t => !selectedInAll.includes(t));
+
+  if (selectedInAll.length === 0) {
+    const ranked = rankDiverseTags(pool, base, sim, 0.95);
+    return smoothAdjacency(ranked, sim, 0, 0.8);
+  }
+
+  // If user is filtering: show related-to-selection first, then diverse others.
+  const REL_T = 0.2; // co-occur threshold
+  const rel: {t: string; relScore: number}[] = [];
+  const other: string[] = [];
+  for (const t of pool) {
+    const relScore = Math.max(...selectedInAll.map(s => sim(t, s)));
+    if (relScore >= REL_T) rel.push({ t, relScore });
+    else other.push(t);
+  }
+  rel.sort((a, b) => (b.relScore - a.relScore) || (base(b.t) - base(a.t)));
+  const relTags = rel.map(x => x.t);
+  const otherTags = rankDiverseTags(other, base, sim, 0.9);
+  const combined = Array.from(new Set([...selectedInAll, ...relTags, ...otherTags]));
+  return smoothAdjacency(combined, sim, selectedInAll.length, 0.85);
+}
+
+// ---------- Co-occurrence & relaterte notater ----------
+function buildCooccurrence(notes: Note[]): Map<string, Map<string, number>> {
+  const co = new Map<string, Map<string, number>>();
+  for (const n of notes) {
+    const tags = Array.from(new Set(n.tags || []));
+    for (let i = 0; i < tags.length; i++) {
+      for (let j = i + 1; j < tags.length; j++) {
+        const a = tags[i], b = tags[j];
+        if (!co.has(a)) co.set(a, new Map());
+        if (!co.has(b)) co.set(b, new Map());
+        co.get(a)!.set(b, (co.get(a)!.get(b) || 0) + 1);
+        co.get(b)!.set(a, (co.get(b)!.get(a) || 0) + 1);
+      }
+    }
+  }
+  return co;
+}
+
+function rankRelatedNotes(
+  notes: Note[],
+  selectedTags: string[],
+  stats: Map<string, TagStat>,
+  co: Map<string, Map<string, number>>
+): Note[] {
+  if (selectedTags.length === 0) return [];
+  const sel = new Set<string>(selectedTags);
+
+  const times = notes.map(n => n.updatedAt || n.createdAt || 0);
+  const minT = Math.min(...times);
+  const maxT = Math.max(minT + 1, ...times);
+  const recency = (n: Note) => ((n.updatedAt || n.createdAt || 0) - minT) / (maxT - minT);
+
+  const scored = notes.map(n => {
+    const ntags = n.tags || [];
+    const overlap = ntags.filter(t => sel.has(t)).length; // direkte overlapp
+    let coo = 0;
+    for (const s of sel) {
+      const row = co.get(s) || new Map<string, number>();
+      for (const t of ntags) coo += (row.get(t) || 0);
+    }
+    const freqBoost = ntags.reduce((acc, t) => acc + (stats.get(t)?.count || 0), 0) / 10;
+    const score = overlap * 5 + coo * 1 + recency(n) * 0.5 + freqBoost;
+    return { n, score };
+  });
+
+  scored.sort((a, b) => b.score - a.score || (b.n.updatedAt - a.n.updatedAt));
+  return scored.map(x => x.n);
 }
 
 // ---------- Bilde (enkel) ----------
@@ -125,7 +327,7 @@ function runSelfTests(): void {
   // Test linjesplitt + tittel
   const t1 = computedTitleFromBody("Hei\nVerden");
   if (t1 !== "Hei") console.warn("TEST: computedTitleFromBody feilet", t1);
-  const b1 = bodyWithoutTitle("Tittel\r\nLinje1\rLinje2\u2028Linje3");
+  const b1 = bodyWithoutTitle("Tittel\nLinje1\rLinje2\u2028Linje3");
   if (b1 !== "Linje1\nLinje2\nLinje3") console.warn("TEST: bodyWithoutTitle feilet", JSON.stringify(b1));
   // Tag-stat
   const stats = buildTagStats([{id:"1",title:"a",body:"",tags:["x","y"],createdAt:1,updatedAt:2}]);
@@ -133,7 +335,7 @@ function runSelfTests(): void {
 }
 
 // ---------- App ----------
-export default function App(): JSX.Element {
+export default function App() {
   useEffect(()=>{
     // Registrer SW hvis finnes – rolig fallback
     if ('serviceWorker' in navigator) {
@@ -153,7 +355,7 @@ export default function App(): JSX.Element {
 }
 
 // ---------- NotesPanel ----------
-function NotesPanel(): JSX.Element {
+function NotesPanel() {
   const [notes, setNotes] = useState<Note[]>(()=>{
     const raw = storage.get<Partial<Note>[]>("storm_notes", []);
     return raw.map((n)=>{
@@ -184,15 +386,12 @@ function NotesPanel(): JSX.Element {
 
   const allTags = useMemo(()=> Array.from(new Set(notes.flatMap(n=>n.tags||[]))), [notes]);
   const tagStats = useMemo(()=> buildTagStats(notes), [notes]);
+  const tagIndex = useMemo(()=> buildTagNoteIndex(notes), [notes]);
+  const cooc = useMemo(()=> buildCooccurrence(notes), [notes]);
 
   const topBarTags = useMemo(()=>{
-    // Sorter tagger etter nylig bruk og count
-    const arr = [...allTags];
-    arr.sort((a,b)=> (tagStats.get(b)?.count||0) - (tagStats.get(a)?.count||0)
-      || (tagStats.get(b)?.lastUsed||0) - (tagStats.get(a)?.lastUsed||0)
-      || a.localeCompare(b));
-    return arr;
-  }, [allTags, tagStats]);
+    return computeTopBarOrder(allTags, tagStats, tagIndex, selectedTags);
+  }, [allTags, tagStats, tagIndex, selectedTags]);
 
   const filteredTopBarTags = useMemo(()=>{
     const q = tagQuery.trim().toLowerCase();
@@ -219,15 +418,30 @@ function NotesPanel(): JSX.Element {
     try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch {}
   };
 
-  const createNewNote = () => {
+  const createNewNote = useCallback(() => {
     const now = Date.now();
-    const seeded = unique([...(selectedTags||[])]);
-    seeded.forEach(assignColorIfMissing);
-    const note: Note = { id: uid("note"), title: "(uten tittel)", body: "", tags: seeded, createdAt: now, updatedAt: now };
-    setNotes(arr=> [note, ...arr]);
+    const seededTags = [...selectedTags];
+    seededTags.forEach(assignColorIfMissing);
+    const note: Note = {
+      id: uid("note"),
+      title: "(uten tittel)",
+      body: "",
+      tags: seededTags,
+      image: undefined,
+      createdAt: now,
+      updatedAt: now,
+    };
+    setNotes(arr => [note, ...arr]);
     setDraftId(note.id);
-    setTimeout(()=> draftRef.current?.focus(), 0);
-  };
+    setTimeout(() => draftRef.current?.focus(), 0);
+  }, [selectedTags]);
+
+  // Lytt på globalt + (FAB) og opprett notat
+  useEffect(() => {
+    const onCreate = () => createNewNote();
+    document.addEventListener('storm:intent-create', onCreate);
+    return () => document.removeEventListener('storm:intent-create', onCreate);
+  }, [createNewNote]);
 
   const openNote = (id: string) => { setDraftId(id); setTimeout(()=> draftRef.current?.focus(), 0); };
   const closeDraft = () => setDraftId(null);
@@ -263,12 +477,109 @@ function NotesPanel(): JSX.Element {
 
   const onChooseImage = (id: string) => { setPendingImgFor(id); fileRef.current?.click(); };
 
+  // --- Direkte & Relaterte ---
+  const byNewest = useCallback((a: Note,b: Note)=> (b.createdAt - a.createdAt), []);
+
   const directNotes = useMemo(()=>{
-    const byNewest = (a: Note,b: Note)=> (b.createdAt - a.createdAt);
     return (selectedTags.length===0)
       ? [...notes].sort(byNewest)
       : notes.filter(n => selectedTags.every(t => (n.tags||[]).includes(t))).sort(byNewest);
-  }, [notes, selectedTags]);
+  }, [notes, selectedTags, byNewest]);
+
+  const relatedNotes = useMemo(()=>{
+    if (selectedTags.length===0) return [] as Note[];
+    const ranked = rankRelatedNotes(notes, selectedTags, tagStats, cooc);
+    const directIds = new Set(directNotes.map(n=>n.id));
+    return ranked.filter(n => !directIds.has(n.id));
+  }, [notes, selectedTags, tagStats, cooc, directNotes]);
+
+  // Felles renderer for ett notat (draft/lesemodus)
+  const renderNote = (n: Note) => {
+    
+    if (draftNote && draftNote.id === n.id) {
+      return (
+        <article id={`note-${n.id}`} key={n.id} className="py-4">
+          {(n.tags||[]).length>0 && (
+            <div className="mb-2 text-sm">
+              {(n.tags||[]).map((t)=> (
+                <span
+                  key={t}
+                  role="button"
+                  tabIndex={0}
+                  className="mr-2 inline-flex items-center gap-1 px-2 py-1 rounded-full text-white cursor-default"
+                  style={{ background: tagBgForWhite(t) }}
+                  title="Tagg for dette notatet"
+                >
+                  {t}
+                  <button
+                    className="ml-1 text-xs leading-none opacity-70 hover:opacity-100"
+                    title={`Fjern tagg ${t}`}
+                    onClick={(e)=>{ e.stopPropagation(); removeTagFromDraft(t); }}
+                    aria-label={`Fjern tagg ${t}`}
+                    type="button"
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+
+          {n.image && (
+            <img src={n.image} alt="Vedlagt" className="mb-2 w-full rounded-xl border" />
+          )}
+
+          <textarea
+            ref={draftRef}
+            value={n.body}
+            onChange={onBodyChange}
+            className="w-full min-h-[160px] px-3 py-2 rounded-xl border bg-white focus:outline-none focus:ring-2 focus:ring-neutral-900"
+            placeholder="Skriv notatet ditt…"
+          />
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <input
+              type="text"
+              placeholder="Legg til tagg og Enter"
+              onKeyDown={(e)=>{ if(e.key==="Enter"){ const v=(e.currentTarget.value||"").trim(); if(v){ addTagToDraft(v); e.currentTarget.value=""; } } }}
+              className="px-3 py-1.5 rounded-full border text-sm"
+            />
+            <button onClick={()=>onChooseImage(n.id)} className="px-3 py-1.5 rounded-full border text-sm" type="button">Legg til bilde</button>
+            <button onClick={closeDraft} className="px-3 py-1.5 rounded-full border text-sm" type="button">Ferdig</button>
+          </div>
+        </article>
+      );
+    }
+
+    // Lesemodus
+    return (
+      <article key={n.id} className="rounded-2xl border overflow-hidden cursor-pointer" onClick={()=>openNote(n.id)}>
+        <header className="px-4 py-3 border-b">
+          <h3 className="font-semibold leading-tight">{n.title}</h3>
+          {(n.tags||[]).length>0 && (
+            <div className="mt-2 text-xs opacity-90">
+              {(n.tags||[]).map((t)=> (
+                <span
+                  key={t}
+                  onClick={(e)=>selectTagFromFeed(n.id, t, e)}
+                  role="button"
+                  tabIndex={0}
+                  className="mr-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-white hover:opacity-90"
+                  style={{ background: tagBgForWhite(t) }}
+                  title="Filtrer på tagg"
+                >
+                  {t}
+                </span>
+              ))}
+            </div>
+          )}
+        </header>
+        {n.image && (
+          <img src={n.image} alt="Vedlagt" className="w-full max-h-[360px] object-cover" />
+        )}
+        <div className="p-4 text-sm text-neutral-700 whitespace-pre-wrap">{bodyWithoutTitle(n.body)}</div>
+      </article>
+    );
+  };
 
   return (
     <section>
@@ -302,7 +613,7 @@ function NotesPanel(): JSX.Element {
                 key={t}
                 onClick={()=>onTopTagClick(t)}
                 className={"inline-flex items-center gap-2 text-sm mr-2 px-3 py-1.5 rounded-full transition text-white "+(selectedTags.includes(t)?"ring-2 ring-neutral-900 ring-offset-2 ring-offset-white":"hover:opacity-90")}
-                style={{ background: tagFillColor(t) }}
+                style={{ background: tagBgForWhite(t) }}
               >
                 {t}
               </button>
@@ -321,98 +632,24 @@ function NotesPanel(): JSX.Element {
 
       {/* Notatstrøm */}
       <div className="mt-2 space-y-4">
-        {directNotes.map((n)=>{
-          const domTag = (n.tags||[])[0];
-          const tileColor = domTag ? getTagColor(domTag) : "#e5e7eb";
-          const textColor = domTag ? getContrastTextColor(tileColor) : "#6b7280";
+        {/* Direkte treff først */}
+        {directNotes.map(renderNote)}
 
-          if (draftNote && draftNote.id === n.id) {
-            return (
-              <article id={`note-${n.id}`} key={n.id} className="py-4">
-                {(n.tags||[]).length>0 && (
-                  <div className="mb-2 text-sm">
-                    {(n.tags||[]).map((t)=> (
-                      <span
-                        key={t}
-                        role="button"
-                        tabIndex={0}
-                        className="mr-2 inline-flex items-center gap-1 px-2 py-1 rounded-full text-white cursor-default"
-                        style={{ background: tagFillColor(t) }}
-                        title="Tagg for dette notatet"
-                      >
-                        {t}
-                        <button
-                          className="ml-1 text-xs leading-none opacity-70 hover:opacity-100"
-                          title={`Fjern tagg ${t}`}
-                          onClick={(e)=>{ e.stopPropagation(); removeTagFromDraft(t); }}
-                          aria-label={`Fjern tagg ${t}`}
-                          type="button"
-                        >
-                          ×
-                        </button>
-                      </span>
-                    ))}
-                  </div>
-                )}
+        {/* Relaterte etterpå, kun når noen tagger er valgt */}
+        {selectedTags.length>0 && relatedNotes.length>0 && (
+          <div className="pt-2">
+            <div className="text-xs uppercase tracking-wide text-neutral-500 px-1">Relaterte notater</div>
+            <div className="mt-2 space-y-4">
+              {relatedNotes.map(renderNote)}
+            </div>
+          </div>
+        )}
 
-                {n.image && (
-                  <img src={n.image} alt="Vedlagt" className="mb-2 w-full rounded-xl border" />
-                )}
-
-                <textarea
-                  ref={draftRef}
-                  value={n.body}
-                  onChange={onBodyChange}
-                  className="w-full min-h-[160px] px-3 py-2 rounded-xl border bg-white focus:outline-none focus:ring-2 focus:ring-neutral-900"
-                  placeholder="Skriv notatet ditt…"
-                />
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <input
-                    type="text"
-                    placeholder="Legg til tagg og Enter"
-                    onKeyDown={(e)=>{ if(e.key==="Enter"){ const v=(e.currentTarget.value||"").trim(); if(v){ addTagToDraft(v); e.currentTarget.value=""; } } }}
-                    className="px-3 py-1.5 rounded-full border text-sm"
-                  />
-                  <button onClick={()=>onChooseImage(n.id)} className="px-3 py-1.5 rounded-full border text-sm" type="button">Legg til bilde</button>
-                  <button onClick={closeDraft} className="px-3 py-1.5 rounded-full border text-sm" type="button">Ferdig</button>
-                </div>
-              </article>
-            );
-          }
-
-          // Lesemodus
-          return (
-            <article key={n.id} className="rounded-2xl border overflow-hidden cursor-pointer" onClick={()=>openNote(n.id)}>
-              <header className="px-4 py-3" style={{ background: tileColor, color: textColor }}>
-                <h3 className="font-semibold leading-tight">{n.title}</h3>
-                {(n.tags||[]).length>0 && (
-                  <div className="mt-2 text-xs opacity-90">
-                    {(n.tags||[]).map((t)=> (
-                      <span
-                        key={t}
-                        onClick={(e)=>selectTagFromFeed(n.id, t, e)}
-                        role="button"
-                        tabIndex={0}
-                        className="mr-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-white hover:opacity-90"
-                        style={{ background: tagFillColor(t) }}
-                        title="Filtrer på tagg"
-                      >
-                        {t}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </header>
-              {n.image && (
-                <img src={n.image} alt="Vedlagt" className="w-full max-h-[360px] object-cover" />
-              )}
-              <div className="p-4 text-sm text-neutral-700 whitespace-pre-wrap">{bodyWithoutTitle(n.body)}</div>
-            </article>
-          );
-        })}
-
-        {directNotes.length===0 && (
+        {directNotes.length===0 && selectedTags.length===0 && (
           <p className="text-neutral-500 text-sm">Ingen notater enda. Klikk + nede til høyre for å begynne.</p>
+        )}
+        {directNotes.length===0 && selectedTags.length>0 && relatedNotes.length===0 && (
+          <p className="text-neutral-500 text-sm">Ingen notater matcher disse taggene.</p>
         )}
       </div>
     </section>
@@ -420,18 +657,11 @@ function NotesPanel(): JSX.Element {
 }
 
 // ---------- + Floating Action Button ----------
-function AddNoteFAB(): JSX.Element {
+function AddNoteFAB() {
   const click = () => {
     const ev = new Event('storm:intent-create');
     document.dispatchEvent(ev);
   };
-  // Bro til NotesPanel (lytter på document):
-  useEffect(()=>{
-    const handler = () => {};
-    document.addEventListener('storm:intent-create', handler);
-    return ()=> document.removeEventListener('storm:intent-create', handler);
-  },[]);
-
   return (
     <button
       onClick={click}
