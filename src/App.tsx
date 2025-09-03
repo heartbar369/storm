@@ -5,9 +5,9 @@ import { computedTitleFromBody } from './lib/text';
 import { colorForTag, ensureContrastBgForWhite } from './lib/tags';
 import { debounce, loadNotes, saveNotes } from './lib/storage';
 import { directAndRelatedNotes, rankTopBarTags, tagBaseScores } from './lib/rank';
-import { Plus, Check, ImagePlus, X, Pencil, Eraser } from 'lucide-react';
+import { Plus, Check, ImagePlus, X, Eraser } from 'lucide-react';
 
-const LOGO_PATH = '/icons/icon-192.png';
+const LOGO_PATH = '/icons/icon-192.png'; // Bytt om du har egen logo i /public
 
 function uid() { return Math.random().toString(36).slice(2) + Date.now().toString(36); }
 function useDebouncedSave(notes: Note[]) {
@@ -15,36 +15,16 @@ function useDebouncedSave(notes: Note[]) {
   useEffect(() => { save(notes); }, [notes, save]);
 }
 
-/** Stopwords (no/en – enkel liste) */
+/** Enkle stopwords (no/en) */
 const STOP = new Set([
   'og','i','på','til','det','en','et','jeg','du','vi','dere','er','som','av','med','for','ikke','å','eller','men','de','der','den',
   'the','a','an','of','in','on','to','is','are','be','as','at','by','for','and','or','not'
 ]);
 
-/** Tokenizer av brødtekst */
+/** Tokenizer av brødtekst → unike ord */
 function extractTokens(text: string): string[] {
   const m = text.toLowerCase().match(/[\p{L}\p{N}_-]+/gu) || [];
-  return m.filter(w => w.length >= 2 && !STOP.has(w) && !/^\d+$/.test(w));
-}
-
-/** Best-effort henting av og:image som dataURL (ignorér feil/CORS) */
-async function tryFetchOgImage(url: string): Promise<string | undefined> {
-  try {
-    const res = await fetch(url, { mode: 'cors' });
-    if (!res.ok) return undefined;
-    const html = await res.text();
-    const match = html.match(/<meta[^>]+property=["']og:image["'][^>]*content=["']([^"']+)["'][^>]*>/i);
-    const imgUrl = match?.[1]; if (!imgUrl) return undefined;
-    const imgRes = await fetch(imgUrl, { mode: 'cors' });
-    if (!imgRes.ok) return undefined;
-    const blob = await imgRes.blob();
-    const fr = new FileReader();
-    return await new Promise((resolve) => {
-      fr.onload = () => resolve(String(fr.result));
-      fr.onerror = () => resolve(undefined);
-      fr.readAsDataURL(blob);
-    });
-  } catch { return undefined; }
+  return Array.from(new Set(m.filter(w => w.length >= 2 && !STOP.has(w) && !/^\d+$/.test(w))));
 }
 
 function TagPill({ tag, onClick, onRemove, asButton = true }: { tag: string; onClick?: () => void; onRemove?: () => void; asButton?: boolean }) {
@@ -53,7 +33,9 @@ function TagPill({ tag, onClick, onRemove, asButton = true }: { tag: string; onC
   return (
     <El className="tagpill" style={{ background: bg }} onClick={onClick} title={tag} aria-label={tag}>
       <span>{tag}</span>
-      {onRemove && <span className="x" onClick={(e) => { e.stopPropagation(); onRemove(); }} aria-label={`Fjern ${tag}`}>×</span>}
+      {onRemove && (
+        <span className="x" onClick={(e) => { e.stopPropagation(); onRemove(); }} aria-label={`Fjern ${tag}`}>×</span>
+      )}
     </El>
   );
 }
@@ -78,12 +60,17 @@ function TopBar({
     const prefix = allTags.filter(t => t.toLowerCase().startsWith(q));
     const contains = allTags.filter(t => !prefix.includes(t) && t.toLowerCase().includes(q));
     const score = (t: string) => (baseScores[t] || 0) + (t.toLowerCase().startsWith(q) ? 1.5 : (t.toLowerCase().includes(q) ? 0.3 : 0));
-    return [...prefix, ...contains].sort((a, b) => score(b) - score(a)).slice(0, 12);
+    return [...prefix, ...contains].sort((a, b) => score(b) - score(a)).slice(0, 20);
   }, [input, allTags, baseScores]);
 
+  function scrollBottom() {
+    requestAnimationFrame(() => {
+      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' });
+    });
+  }
   function toggleFilterTag(t: string) {
     setSelected(selected.includes(t) ? selected.filter(x => x !== t) : [...selected, t]);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    scrollBottom(); // Vis nyeste direkte treff nederst
   }
   function onEnter() {
     const top = (typeahead[0] || input.trim());
@@ -96,13 +83,13 @@ function TopBar({
     <div className="topbar">
       <div className="topbar-inner">
         <div className="row" style={{ gap: 10 }}>
+          {/* Valgte filter-tagger */}
           {selected.map(t => (
             <TagPill key={t} tag={t} onClick={() => toggleFilterTag(t)} onRemove={() => toggleFilterTag(t)} />
           ))}
 
-          {/* App-logo fra /public */}
+          {/* Logo (valgfri) + søk/input */}
           <img className="logo-img" src={LOGO_PATH} alt="Storm" />
-
           <input
             className="input"
             placeholder={draftOpen ? 'Legg til tagg i notat…' : 'Søk/velg tagg…'}
@@ -118,45 +105,40 @@ function TopBar({
           )}
         </div>
 
-        {input ? (
-          <div className="suggestion-bar">
-            {typeahead.map(t => (
-              <TagPill key={t} tag={t} onClick={() => { draftOpen ? onAddTagToDraft(t) : toggleFilterTag(t); setInput(''); }} />
-            ))}
-          </div>
-        ) : (
-          <div className="suggestion-bar">
-            {ranked.slice(0, 24).map(t => (
-              <TagPill key={t} tag={t} onClick={() => draftOpen ? onAddTagToDraft(t) : toggleFilterTag(t)} />
-            ))}
-          </div>
-        )}
+        {/* ÉN linje – scroll horisontalt */}
+        <div className="topbar-tags">
+          {(input ? typeahead : ranked.slice(0, 50)).map(t => (
+            <TagPill key={t} tag={t} onClick={() => { draftOpen ? onAddTagToDraft(t) : toggleFilterTag(t); if (input) setInput(''); }} />
+          ))}
+        </div>
       </div>
     </div>
   );
 }
 
-/* Lesekort */
+/* Lesekort – klikk hvor som helst for å redigere. Bilde til høyre. */
 function ReadCard({ note, onEdit, onClickTag }: { note: Note; onEdit: () => void; onClickTag: (t: string) => void; }) {
   const bodyPreview = note.body.split(/\r\n|\n|\r|\u2028|\u2029/).join('\n');
   return (
-    <div className="card">
-      <div className="tags">
+    <div className="card" onClick={onEdit} role="button" aria-label="Rediger notat">
+      <div className="tags" onClick={(e) => e.stopPropagation()}>
         {note.tags.map(t => (
           <span key={t} onClick={(e) => { e.stopPropagation(); onClickTag(t); }}>
             <TagPill tag={t} asButton={false} />
           </span>
         ))}
       </div>
-      {note.image && <img src={note.image} alt="" />}
-      <h3>{note.title || '(uten tittel)'}</h3>
-      <p>{bodyPreview}</p>
-      <div className="edit-actions">
-        <button className="icon-btn" onClick={onEdit} title="Rediger" aria-label="Rediger">
-          <Pencil color="var(--iconB)" strokeWidth={2.5} />
-        </button>
-        <span className="small">Oppdatert: {new Date(note.updatedAt || note.createdAt).toLocaleString()}</span>
+
+      <div className="card-row">
+        <div className="text">
+          {note.title && <h3>{note.title}</h3>}
+          {bodyPreview && <p>{bodyPreview}</p>}
+        </div>
+        {note.image && <img className="thumb" src={note.image} alt="" />}
       </div>
+
+      {/* edit-knapp fjernet – hele kortet er klikkbart */}
+      <div className="small">Oppdatert: {new Date(note.updatedAt || note.createdAt).toLocaleString()}</div>
     </div>
   );
 }
@@ -168,49 +150,41 @@ function EditCard({ note, onSave, onDelete, onCancel }:
   const [tags, setTags] = useState<string[]>(note.tags);
   const [tagInput, setTagInput] = useState('');
   const [image, setImage] = useState<string | undefined>(note.image);
-  const textRef = useRef<HTMLTextAreaElement | null>(null);
-  const [selectedWord, setSelectedWord] = useState<string | null>(null);
-  const [cursorWord, setCursorWord] = useState<string | null>(null);
 
+  const textRef = useRef<HTMLTextAreaElement | null>(null);
+  const caretRef = useRef<number>(0);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
+  // oppdater caret-ref løpende
+  const updateCaretRef = () => {
+    const ta = textRef.current;
+    if (ta && typeof ta.selectionStart === 'number') caretRef.current = ta.selectionStart;
+  };
+
   useEffect(() => { setBody(note.body); setTags(note.tags); setImage(note.image); }, [note.id]);
+
+  // Tittel beregnes, men ikke vist i UI
   const title = useMemo(() => computedTitleFromBody(body), [body]);
 
-  // Kjente tagger
-  const knownTags = useMemo(() => {
-    const s = new Set<string>();
-    try {
-      const raw = localStorage.getItem('storm_notes');
-      if (raw) (JSON.parse(raw) as Note[]).forEach(n => n.tags.forEach(t => s.add(t)));
-    } catch {}
-    tags.forEach(t => s.delete(t));
-    return s;
-  }, [tags]);
-
-  const knownFreq: Record<string, number> = useMemo(() => {
-    const f: Record<string, number> = {};
-    try {
-      const raw = localStorage.getItem('storm_notes');
-      if (raw) (JSON.parse(raw) as Note[]).forEach(n => n.tags.forEach(t => { f[t] = (f[t] || 0) + 1; }));
-    } catch {}
-    return f;
-  }, []);
-
-  const tokens = useMemo(() => extractTokens(body), [body]);
-  const tokenFreq: Record<string, number> = useMemo(() => {
-    const f: Record<string, number> = {};
-    for (const w of tokens) f[w] = (f[w] || 0) + 1;
-    return f;
-  }, [tokens]);
-
-  const coScore = (t: string) => tags.reduce((s, ex) => s + (ex && t ? 1 : 0), 0);
+  // Kun foreslå ord som finnes i teksten (ikke historikk)
+  const textTokens = useMemo(() => extractTokens(body), [body]);
 
   function addTag(t: string) {
     const clean = t.trim(); if (!clean) return;
     if (tags.includes(clean)) return;
-    setTags([...tags, clean]);
+    const winY = window.scrollY;
+    const caret = caretRef.current;
+    setTags(prev => [...prev, clean]);
     setTagInput('');
+    // hold fokus/caret og scrollposisjon
+    setTimeout(() => {
+      const ta = textRef.current;
+      if (ta) {
+        ta.focus();
+        try { ta.setSelectionRange(caret, caret); } catch {}
+      }
+      window.scrollTo({ top: winY });
+    }, 0);
   }
   function removeTag(t: string) { setTags(tags.filter(x => x !== t)); }
 
@@ -227,6 +201,27 @@ function EditCard({ note, onSave, onDelete, onCancel }:
     onSave({ ...note, body, title, tags, image, updatedAt: Date.now() });
   }
 
+  // Autosave når bruker “forlater” appen
+  useEffect(() => {
+    const handler = () => { persist(); };
+    const vis = () => { if (document.hidden) persist(); };
+    window.addEventListener('beforeunload', handler);
+    window.addEventListener('pagehide', handler);
+    window.addEventListener('blur', handler);
+    document.addEventListener('visibilitychange', vis);
+    return () => {
+      window.removeEventListener('beforeunload', handler);
+      window.removeEventListener('pagehide', handler);
+      window.removeEventListener('blur', handler);
+      document.removeEventListener('visibilitychange', vis);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [body, tags, image, title]);
+
+  // Forslag kun fra tekst:
+  // 1) Et ord markert/ved cursor gir presise forslag (prefix/contains).
+  // 2) Inputfelt for tagg filtrerer tekst-ord.
+  const [cursorWord, setCursorWord] = useState<string | null>(null);
   function getWordAt(text: string, pos: number) {
     const left = text.slice(0, pos), right = text.slice(pos);
     const leftMatch = left.match(/[\p{L}\p{N}_-]+$/u);
@@ -236,107 +231,75 @@ function EditCard({ note, onSave, onDelete, onCancel }:
   }
   function handleSelectOrInput() {
     const ta = textRef.current; if (!ta) return;
-    const start = ta.selectionStart ?? 0, end = ta.selectionEnd ?? 0;
-    if (end > start) {
-      const sel = ta.value.slice(start, end).trim().replace(/^[#]+/, '').slice(0, 40);
-      setSelectedWord(sel || null);
-    } else {
-      setSelectedWord(null);
-      const w = getWordAt(ta.value, start);
-      setCursorWord(w || null);
-    }
+    updateCaretRef();
+    const start = ta.selectionStart ?? 0;
+    const w = getWordAt(ta.value, start);
+    setCursorWord(w || null);
   }
-
-  const smartSuggestions = useMemo(() => {
-    const fromText = Object.keys(tokenFreq);
-    const set = new Set<string>(fromText);
-    knownTags.forEach(t => set.add(t));
-    const score = (t: string) =>
-      (tokenFreq[t] || 0) * 1.0 + (knownFreq[t] ? 3 : 0) + coScore(t) * 2 + Math.min(0.4, Math.max(0, (t.length - 2)) * 0.02);
-    return Array.from(set).filter(t => !tags.includes(t)).sort((a,b)=> score(b)-score(a)).slice(0, 10);
-  }, [tokenFreq, knownTags, knownFreq, tags]);
 
   const contextualSuggestions = useMemo(() => {
     const w = (cursorWord || '').toLowerCase();
     if (!w || w.length < 2) return [] as string[];
-    const pool = Array.from(knownTags).filter(t => t.toLowerCase().includes(w));
-    const score = (t: string) => (knownFreq[t] || 0) + (t.toLowerCase().startsWith(w) ? 2 : (t.toLowerCase().includes(w) ? 0.5 : 0)) + coScore(t);
-    return pool.sort((a,b)=> score(b)-score(a)).slice(0, 8);
-  }, [cursorWord, knownTags, knownFreq, tags]);
+    const pool = textTokens.filter(t => !tags.includes(t) && (t.toLowerCase().startsWith(w) || t.toLowerCase().includes(w)));
+    // prefiks først, deretter contains
+    const score = (t: string) => (t.toLowerCase().startsWith(w) ? 2 : 0.5);
+    return pool.sort((a,b)=> score(b)-score(a)).slice(0, 10);
+  }, [cursorWord, textTokens, tags]);
 
   const inputSuggestions = useMemo(() => {
     const q = tagInput.trim().toLowerCase();
     if (!q) return [] as string[];
-    const pool = Array.from(knownTags).filter(t => t.toLowerCase().includes(q));
-    const score = (t: string) => (knownFreq[t] || 0) + 3 * coScore(t) + (t.toLowerCase().startsWith(q) ? 2 : (t.toLowerCase().includes(q) ? 0.5 : 0));
+    const pool = textTokens.filter(t => !tags.includes(t) && (t.toLowerCase().startsWith(q) || t.toLowerCase().includes(q)));
+    const score = (t: string) => (t.toLowerCase().startsWith(q) ? 2 : 0.5);
     return pool.sort((a,b)=> score(b)-score(a)).slice(0, 10);
-  }, [tagInput, knownTags, knownFreq, tags]);
+  }, [tagInput, textTokens, tags]);
 
   return (
-    <div className="editcard">
-      {/* Tagger over notatet */}
-      <div className="tags">
-        {tags.map(t => (<TagPill key={t} tag={t} onRemove={() => removeTag(t)} />))}
-      </div>
-
-      {image && <img src={image} alt="" />}
-
-      <div className="small">Tittel (auto):</div>
-      <div style={{ fontWeight: 700, marginTop: 4 }}>{title || '(uten tittel)'}</div>
+    <div className="editcard" onClick={(e) => e.stopPropagation()} role="group" aria-label="Rediger notat">
+      {image && <img src={image} alt="" style={{ width: '100%', height: 'auto', borderRadius: 12, border: '1px solid var(--muted)' }} />}
 
       <textarea
         ref={textRef}
         value={body}
         onChange={(e) => { setBody(e.target.value); handleSelectOrInput(); }}
-        onSelect={handleSelectOrInput}
+        onClick={handleSelectOrInput}
         onKeyUp={handleSelectOrInput}
         placeholder="Skriv notat…"
-        style={{ width: '100%', minHeight: 180, padding: 10, borderRadius: 12 }}
       />
 
-      {/* Hurtig-chip ved markert ord */}
-      {selectedWord && selectedWord.length > 0 && (
+      {/* Forslag fra ord ved markør */}
+      {contextualSuggestions.length > 0 && (
         <div className="suggestion-bar">
-          <button className="suggestion-pill" onClick={() => { addTag(selectedWord); setSelectedWord(null); }}>
-            {selectedWord}
-          </button>
-        </div>
-      )}
-
-      {/* Live forslag fra tekst + kjente tagger */}
-      {smartSuggestions.length > 0 && (
-        <div className="suggestion-bar">
-          {smartSuggestions.map(t => (
-            Array.from(knownTags).includes(t)
-              ? <TagPill key={t} tag={t} onClick={() => addTag(t)} />
-              : <button key={t} className="suggestion-pill" onClick={() => addTag(t)}>{t}</button>
+          {contextualSuggestions.map(t => (
+            <button key={t} className="suggestion-pill" onClick={() => addTag(t)}>{t}</button>
           ))}
         </div>
       )}
 
-      {/* Kontekstuelle forslag */}
-      {contextualSuggestions.length > 0 && (
-        <div className="suggestion-bar">
-          {contextualSuggestions.map(t => (<TagPill key={t} tag={t} onClick={() => addTag(t)} />))}
-        </div>
-      )}
+      {/* Tagger i notatet */}
+      <div className="tags">
+        {tags.map(t => (<TagPill key={t} tag={t} onRemove={() => removeTag(t)} />))}
+      </div>
 
-      {/* Manuell tagg-input */}
+      {/* Manuell tagg-input (filtrerer kun ord som finnes i teksten) */}
       <div className="row" style={{ marginTop: 6 }}>
         <input className="input" placeholder="Legg til tagg…" value={tagInput}
           onChange={(e) => setTagInput(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') { addTag(tagInput); } }} />
+          onKeyDown={(e) => { if (e.key === 'Enter') addTag(tagInput); }}
+          onBlur={updateCaretRef}
+          onFocus={updateCaretRef}
+        />
         <button className="icon-btn" onClick={() => addTag(tagInput)} title="Legg til tagg" aria-label="Legg til tagg">
           <Plus color="var(--iconB)" strokeWidth={2.5} />
         </button>
       </div>
       {inputSuggestions.length > 0 && (
         <div className="suggestion-bar">
-          {inputSuggestions.map(t => (<TagPill key={t} tag={t} onClick={() => addTag(t)} />))}
+          {inputSuggestions.map(t => (<button key={t} className="suggestion-pill" onClick={() => addTag(t)}>{t}</button>))}
         </div>
       )}
 
-      {/* Skjult filinput + ImagePlus-knapp */}
+      {/* Skjult filinput + ImagePlus-knapp + Lukk + Lagre */}
       <input ref={fileRef} type="file" accept="image/*" onChange={onPickFile} style={{ display: 'none' }} />
       <div className="edit-actions">
         <div style={{ display: 'flex', gap: 8 }}>
@@ -360,41 +323,46 @@ export default function App() {
 
   const { direct, related } = useMemo(() => directAndRelatedNotes(notes, selected), [notes, selected]);
 
-  // Feed: eldst øverst → nyest nederst
-  const baseOrder = useMemo(
+  // Basisrekkefølge: eldst → nyest (nyeste nederst)
+  const baseAsc = useMemo(
     () => notes.slice().sort((a,b)=> (a.updatedAt||a.createdAt)-(b.updatedAt||b.createdAt)),
     [notes]
   );
 
+  // Ved filter: vis RELATERTE først (oppover), DIREKTE nederst (nyeste nederst)
   const visible = useMemo(() => {
-    if (selected.length === 0) return baseOrder;
-    const rel = related.map(x => x.note);
-    const ordered = [...direct, ...rel];
-    return ordered.sort((a,b)=> (a.updatedAt||a.createdAt)-(b.updatedAt||b.createdAt));
-  }, [baseOrder, direct, related, selected]);
+    if (selected.length === 0) return baseAsc;
+    const relatedAsc = related.map(x => x.note)
+      .sort((a,b)=> (a.updatedAt||a.createdAt)-(b.updatedAt||b.createdAt));
+    const directAsc = direct.slice()
+      .sort((a,b)=> (a.updatedAt||a.createdAt)-(b.updatedAt||b.createdAt));
+    return [...relatedAsc, ...directAsc];
+  }, [baseAsc, direct, related, selected]);
 
   function addNote(initial?: Partial<Note>) {
     const now = Date.now();
     const n: Note = {
-      id: uid(),
-      title: '',
-      body: initial?.body ?? '',
+      id: uid(), title: '', body: initial?.body ?? '',
       tags: (initial?.tags as string[])?.slice?.() ?? selected.slice(),
-      image: initial?.image,
-      createdAt: now,
-      updatedAt: now
+      image: initial?.image, createdAt: now, updatedAt: now
     };
-    setNotes(prev => [...prev, n]);  // nederst i feed
+    setNotes(prev => [...prev, n]);  // nederst
     setEditingId(n.id);
   }
-  function saveNote(n: Note) {
-    setNotes(prev => prev.map(x => x.id === n.id ? n : x));
-    setEditingId(null);
+  function saveNote(n: Note) { setNotes(prev => prev.map(x => x.id === n.id ? n : x)); setEditingId(null); }
+  function deleteNote(id: string) { setNotes(prev => prev.filter(n => n.id !== id)); setEditingId(null); }
+
+  function scrollBottom() {
+    requestAnimationFrame(() => {
+      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' });
+    });
   }
-  function deleteNote(id: string) {
-    setNotes(prev => prev.filter(n => n.id !== id));
-    setEditingId(null);
+
+  function onClickTagFilter(t: string) {
+    setSelected(prev => prev.includes(t) ? prev : [...prev, t]);
+    scrollBottom();
   }
+
   function addTagToDraft(t: string) {
     if (!editingId) return;
     const tag = t.trim(); if (!tag) return;
@@ -402,31 +370,9 @@ export default function App() {
       ? { ...n, tags: [...n.tags, tag], updatedAt: Date.now() } : n));
   }
 
-  // IMPORT via Web Share Target (Android) eller /?url=...
-  useEffect(() => {
-    const { pathname, search } = window.location;
-    const isShare = pathname === '/share' || pathname === '/share-target' || pathname === '/' || pathname === '';
-    if (!isShare) return;
-
-    const p = new URLSearchParams(search);
-    const url = p.get('url') || '';
-    const title = p.get('title') || '';
-    const text = p.get('text') || '';
-
-    if (!url && !title && !text) return;
-
-    (async () => {
-      let image: string | undefined = undefined;
-      if (url) image = await tryFetchOgImage(url);
-      const body = [title, text, url].filter(Boolean).join('\n\n').trim();
-      addNote({ body, image });
-      history.replaceState(null, '', '/');
-    })();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   return (
     <div className="app">
+      <div className="top-placeholder"></div>
       <TopBar
         notes={notes}
         selected={selected}
@@ -436,11 +382,6 @@ export default function App() {
       />
 
       <div className="container">
-        {selected.length > 0 && (
-          <div className="small" style={{ margin: '6px 0 12px' }}>
-            Direkte treff først. Deretter relaterte notater. (Nyeste nederst)
-          </div>
-        )}
         <div className="feed">
           {visible.map(n => (
             <div key={n.id}>
@@ -454,8 +395,8 @@ export default function App() {
               ) : (
                 <ReadCard
                   note={n}
-                  onEdit={() => setEditingId(n.id)}
-                  onClickTag={(t) => setSelected(prev => prev.includes(t) ? prev : [...prev, t])}
+                  onEdit={() => setEditingId(n.id)}         
+                  onClickTag={(t) => onClickTagFilter(t)}
                 />
               )}
             </div>
