@@ -5,6 +5,10 @@
   --text: #e5e7eb;
   --text-dim: #cbd5e1;
   --accent: #22d3ee;
+
+  /* Layout-synk: lik bredde/padding for topbar og innhold */
+  --page-max: 1100px;
+  --page-pad: 14px;
 }
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; }
@@ -20,20 +24,32 @@ input, textarea { color: var(--text); background: #0b1220; border: 1px solid var
 .app {
   display: flex; flex-direction: column; min-height: 100%;
 }
+
+/* TOP BAR */
 .topbar {
   position: sticky; top: 0; z-index: 10;
   background: linear-gradient(180deg, rgba(11,18,32,.95), rgba(11,18,32,.75));
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--muted);
 }
-.topbar-inner { max-width: 980px; margin: 0 auto; padding: 10px 16px; }
+.topbar-inner {
+  width: min(var(--page-max), 100% - var(--page-pad)*2);
+  margin: 0 auto; padding: 10px 0;
+}
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .input {
-  flex: 1; padding: 8px 10px; border-radius: 8px; outline: none; min-width: 180px;
+  flex: 1; padding: 8px 10px; border-radius: 10px; outline: none; min-width: 180px;
+  border: 1px solid #263043;
 }
+.logo {
+  width: 18px; height: 18px; border-radius: 4px; display: inline-block;
+  box-shadow: 0 0 0 1px rgba(255,255,255,.08) inset;
+}
+
 .tagpill {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 6px 10px; border-radius: 999px; color: #fff; font-weight: 600; border: none;
+  box-shadow: 0 1px 0 rgba(0,0,0,.3) inset, 0 6px 14px rgba(0,0,0,.12);
 }
 .tagpill .x { opacity: .85; font-weight: 700; }
 .tagpill .x:hover { opacity: 1; }
@@ -41,40 +57,57 @@ input, textarea { color: var(--text); background: #0b1220; border: 1px solid var
   display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px;
 }
 
-.container { max-width: 980px; margin: 0 auto; padding: 16px; }
-.controls { display: flex; align-items: center; gap: 8px; margin: 12px 0; }
-.clear { background: #ef4444; border: none; color: #fff; padding: 6px 10px; border-radius: 8px; }
+/* PAGE CONTAINER (samme bredde/padding som topbar) */
+.container {
+  width: min(var(--page-max), 100% - var(--page-pad)*2);
+  margin: 0 auto; padding: 14px 0;
+}
 
-.feed { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; margin-bottom: 80px; }
-.card {
-  background: var(--panel); border: 1px solid var(--muted); border-radius: 14px; padding: 12px; display: flex; flex-direction: column; gap: 8px;
+/* SMALL CONTROLS */
+.controls { display: flex; align-items: center; gap: 8px; margin: 12px 0; }
+.clear { background: #ef4444; border: none; color: #fff; padding: 6px 10px; border-radius: 10px; }
+
+/* FEED */
+.feed {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 14px; margin-bottom: 90px;
+}
+.card, .editcard {
+  background: var(--panel);
+  border: 1px solid var(--muted);
+  border-radius: 16px;
+  padding: 12px;
+  display: flex; flex-direction: column; gap: 10px;
+  box-shadow: 0 6px 24px rgba(0,0,0,.18);
 }
 .card:hover { border-color: #334155; }
 .card h3 { margin: 0; font-size: 18px; }
 .card p { margin: 0; color: var(--text-dim); }
-.card .tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
-.card img { width: 100%; height: auto; border-radius: 10px; border: 1px solid var(--muted); }
 
+/* TAGS – vises over notatet */
+.card .tags, .editcard .tags {
+  display: flex; gap: 6px; flex-wrap: wrap; margin: 2px 0 4px;
+}
+
+/* BILDER: passer på skjermen */
+.card img, .editcard img {
+  width: 100%; height: auto; border-radius: 12px; border: 1px solid var(--muted);
+  max-height: 60vh; object-fit: contain; background: #0b1220;
+}
+
+/* FAB – midtstilt nederst */
 .fab {
-  position: fixed; right: 18px; bottom: 18px; z-index: 20;
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: 18px; z-index: 20;
   width: 56px; height: 56px; border-radius: 999px; display: grid; place-items: center;
   color: #fff; font-size: 26px; font-weight: 700; border: none; background: #22c55e;
   box-shadow: 0 10px 30px rgba(0,0,0,.35);
 }
 
-/* (Tidligere modal beholdes for ev. gjenbruk; ikke i bruk nå) */
-.modal {
-  position: fixed; inset: 0; z-index: 30; display: grid; place-items: center;
-  background: rgba(0,0,0,.5);
-}
-.sheet {
-  width: min(860px, 95vw); max-height: 90vh; overflow: auto; padding: 16px; border-radius: 16px;
-  background: var(--panel); border: 1px solid var(--muted);
-}
+/* (Ikke i bruk nå, beholdt) */
+.modal { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; background: rgba(0,0,0,.5); }
+.sheet { width: min(860px, 95vw); max-height: 90vh; overflow: auto; padding: 16px; border-radius: 16px; background: var(--panel); border: 1px solid var(--muted); }
 .sheet .row { align-items: flex-start; }
-.sheet textarea {
-  width: 100%; min-height: 200px; padding: 10px; border-radius: 10px; resize: vertical;
-}
+.sheet textarea { width: 100%; min-height: 200px; padding: 10px; border-radius: 10px; resize: vertical; }
 .sheet .actions { display: flex; gap: 8px; justify-content: space-between; align-items: center; margin-top: 10px; }
 .sheet .ghost { background: transparent; border: 1px solid var(--muted); color: var(--text); padding: 6px 10px; border-radius: 8px; }
 .sheet .primary { background: #3b82f6; color: #fff; border: none; padding: 8px 12px; border-radius: 8px; }
@@ -82,16 +115,7 @@ input, textarea { color: var(--text); background: #0b1220; border: 1px solid var
 .small { font-size: 12px; opacity: .85; }
 .hr { height: 1px; background: var(--muted); margin: 10px 0; border: 0; }
 
-/* Inline editor (nytt) */
-.editcard {
-  background: var(--panel);
-  border: 1px solid var(--muted);
-  border-radius: 14px;
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
+/* Inline editor */
 .edit-actions { display: flex; gap: 8px; justify-content: space-between; align-items: center; }
 .suggestion-bar { display: flex; gap: 6px; flex-wrap: wrap; }
-.suggestion-pill { border: 1px solid var(--muted); border-radius: 999px; padding: 4px 8px; }
+.suggestion-pill { border: 1px solid var(--muted); border-radius: 999px; padding: 4px 8px; background: #101a2e; }

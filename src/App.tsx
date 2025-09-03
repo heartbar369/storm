@@ -13,12 +13,27 @@ function useDebouncedSave(notes: Note[]) {
   useEffect(() => { save(notes); }, [notes, save]);
 }
 
+/** Stopwords (no/en – enkel liste) */
+const STOP = new Set([
+  'og','i','på','til','det','en','et','jeg','du','vi','dere','er','som','av','med','for','ikke','å','eller','men','de','der','den','det','the','a','an','of','in','on','to','is','are','be','as','at','by','for','and','or','not'
+]);
+
+/** Tokenizer av brødtekst */
+function extractTokens(text: string): string[] {
+  const m = text.toLowerCase().match(/[\p{L}\p{N}_-]+/gu) || [];
+  return m.filter(w =>
+    w.length >= 2 &&
+    !STOP.has(w) &&
+    !/^\d+$/.test(w)
+  );
+}
+
 function TagPill({ tag, onClick, onRemove, asButton = true }: { tag: string; onClick?: () => void; onRemove?: () => void; asButton?: boolean }) {
   const bg = ensureContrastBgForWhite(colorForTag(tag));
   const El: any = asButton ? 'button' : 'span';
   return (
     <El className="tagpill" style={{ background: bg }} onClick={onClick}>
-      <span>#{tag}</span>
+      <span>{tag}</span>
       {onRemove && <span className="x" onClick={(e) => { e.stopPropagation(); onRemove(); }}>×</span>}
     </El>
   );
@@ -31,17 +46,9 @@ function useNotes() {
 }
 
 function TopBar({
-  notes,
-  selected,
-  setSelected,
-  draftOpen,
-  onAddTagToDraft
+  notes, selected, setSelected, draftOpen, onAddTagToDraft
 }: {
-  notes: Note[];
-  selected: string[];
-  setSelected: (tags: string[]) => void;
-  draftOpen: boolean;
-  onAddTagToDraft: (t: string) => void;
+  notes: Note[]; selected: string[]; setSelected: (tags: string[]) => void; draftOpen: boolean; onAddTagToDraft: (t: string) => void;
 }) {
   const [input, setInput] = useState('');
   const baseScores = useMemo(() => tagBaseScores(notes), [notes]);
@@ -61,12 +68,10 @@ function TopBar({
     setSelected(selected.includes(t) ? selected.filter(x => x !== t) : [...selected, t]);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
-
   function onEnter() {
     const top = (typeahead[0] || input.trim());
     if (!top) return;
-    if (draftOpen) onAddTagToDraft(top);
-    else toggleFilterTag(top);
+    if (draftOpen) onAddTagToDraft(top); else toggleFilterTag(top);
     setInput('');
   }
 
@@ -74,16 +79,24 @@ function TopBar({
     <div className="topbar">
       <div className="topbar-inner">
         <div className="row" style={{ gap: 10 }}>
+          {/* Valgte filter-tagger */}
           {selected.map(t => (
             <TagPill key={t} tag={t} onClick={() => toggleFilterTag(t)} onRemove={() => toggleFilterTag(t)} />
           ))}
-          <input className="input" placeholder={draftOpen ? 'Legg til tagg i notat…' : 'Søk/velg tagg…'} value={input}
+
+          {/* Lite ikon + søk/input */}
+          <img className="logo" src="/icons/icon-192.png" alt="Storm" />
+          <input
+            className="input"
+            placeholder={draftOpen ? 'Legg til tagg i notat…' : 'Søk/velg tagg…'}
+            value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') onEnter(); }} />
-          {selected.length > 0 && (
-            <button className="clear" onClick={() => setSelected([])}>Tøm</button>
-          )}
+            onKeyDown={(e) => { if (e.key === 'Enter') onEnter(); }}
+          />
+
+          {selected.length > 0 && <button className="clear" onClick={() => setSelected([])}>Tøm</button>}
         </div>
+
         {input && (
           <div className="topbar-suggest-list">
             {typeahead.map(t => (
@@ -103,13 +116,11 @@ function TopBar({
   );
 }
 
+/* Lesekort: tagger over innholdet */
 function ReadCard({ note, onEdit, onClickTag }: { note: Note; onEdit: () => void; onClickTag: (t: string) => void; }) {
   const bodyPreview = note.body.split(/\r\n|\n|\r|\u2028|\u2029/).join('\n');
   return (
     <div className="card">
-      {note.image && <img src={note.image} alt="" />}
-      <h3>{note.title || '(uten tittel)'}</h3>
-      <p>{bodyPreview}</p>
       <div className="tags">
         {note.tags.map(t => (
           <span key={t} onClick={(e) => { e.stopPropagation(); onClickTag(t); }}>
@@ -117,6 +128,9 @@ function ReadCard({ note, onEdit, onClickTag }: { note: Note; onEdit: () => void
           </span>
         ))}
       </div>
+      {note.image && <img src={note.image} alt="" />}
+      <h3>{note.title || '(uten tittel)'}</h3>
+      <p>{bodyPreview}</p>
       <div className="edit-actions">
         <button className="ghost" onClick={onEdit}>Rediger</button>
         <span className="small">Oppdatert: {new Date(note.updatedAt || note.createdAt).toLocaleString()}</span>
@@ -125,17 +139,10 @@ function ReadCard({ note, onEdit, onClickTag }: { note: Note; onEdit: () => void
   );
 }
 
+/* Redigeringskort: tagger over textarea + live forslag under */
 function EditCard({
-  note,
-  onSave,
-  onDelete,
-  onCancel
-}: {
-  note: Note;
-  onSave: (n: Note) => void;
-  onDelete: (id: string) => void;
-  onCancel: () => void;
-}) {
+  note, onSave, onDelete, onCancel
+}: { note: Note; onSave: (n: Note) => void; onDelete: (id: string) => void; onCancel: () => void; }) {
   const [body, setBody] = useState(note.body);
   const [tags, setTags] = useState<string[]>(note.tags);
   const [tagInput, setTagInput] = useState('');
@@ -145,36 +152,40 @@ function EditCard({
   const [cursorWord, setCursorWord] = useState<string | null>(null);
 
   useEffect(() => { setBody(note.body); setTags(note.tags); setImage(note.image); }, [note.id]);
-
   const title = useMemo(() => computedTitleFromBody(body), [body]);
 
-  // All tags in storage (for suggestions)
-  const candidateTags = useMemo(() => {
-    const all = new Set<string>();
+  // Tidligere lagrede tagger (fra alle notater), minus de vi allerede har
+  const knownTags = useMemo(() => {
+    const s = new Set<string>();
     try {
       const raw = localStorage.getItem('storm_notes');
       if (raw) {
-        const arr = JSON.parse(raw) as Note[];
-        for (const n of arr) for (const t of n.tags) all.add(t);
+        (JSON.parse(raw) as Note[]).forEach(n => n.tags.forEach(t => s.add(t)));
       }
     } catch {}
-    return Array.from(all).filter(t => !tags.includes(t));
+    tags.forEach(t => s.delete(t));
+    return s;
   }, [tags]);
 
-  // Frequency map
-  const freq: Record<string, number> = useMemo(() => {
+  // Frekvens for kjent tag i alle notater (for boost)
+  const knownFreq: Record<string, number> = useMemo(() => {
     const f: Record<string, number> = {};
     try {
       const raw = localStorage.getItem('storm_notes');
       if (raw) {
-        const arr = JSON.parse(raw) as Note[];
-        for (const n of arr) for (const t of n.tags) f[t] = (f[t] || 0) + 1;
+        (JSON.parse(raw) as Note[]).forEach(n => n.tags.forEach(t => { f[t] = (f[t] || 0) + 1; }));
       }
     } catch {}
     return f;
   }, []);
 
-  // Simple co-occurrence proxy to current tags
+  const tokens = useMemo(() => extractTokens(body), [body]);
+  const tokenFreq: Record<string, number> = useMemo(() => {
+    const f: Record<string, number> = {};
+    for (const w of tokens) f[w] = (f[w] || 0) + 1;
+    return f;
+  }, [tokens]);
+
   const coScore = (t: string) => tags.reduce((s, ex) => s + (ex && t ? 1 : 0), 0);
 
   function addTag(t: string) {
@@ -199,7 +210,7 @@ function EditCard({
     onSave({ ...note, body, title, tags, image, updatedAt: Date.now() });
   }
 
-  // Extract word at cursor
+  // Word ved markør / seleksjon → chip for "legg til tagg"
   function getWordAt(text: string, pos: number) {
     const left = text.slice(0, pos);
     const right = text.slice(pos);
@@ -208,16 +219,13 @@ function EditCard({
     const word = ((leftMatch?.[0] || '') + (rightMatch?.[0] || '')) || '';
     return word.trim();
   }
-
   function handleSelectOrInput() {
-    const ta = textRef.current;
-    if (!ta) return;
+    const ta = textRef.current; if (!ta) return;
     const start = ta.selectionStart ?? 0;
     const end = ta.selectionEnd ?? 0;
     if (end > start) {
-      const sel = ta.value.slice(start, end).trim();
-      const clean = sel.replace(/^[#]+/, '').slice(0, 40);
-      setSelectedWord(clean || null);
+      const sel = ta.value.slice(start, end).trim().replace(/^[#]+/, '').slice(0, 40);
+      setSelectedWord(sel || null);
     } else {
       setSelectedWord(null);
       const w = getWordAt(ta.value, start);
@@ -225,29 +233,60 @@ function EditCard({
     }
   }
 
-  // Suggestions from tagInput box (explicit) + contextual based on cursorWord
-  const inputSuggestions = useMemo(() => {
-    const q = tagInput.trim().toLowerCase();
-    if (!q) return [] as string[];
-    const score = (t: string) => (freq[t] || 0) + 3 * coScore(t) + (t.toLowerCase().startsWith(q) ? 2 : (t.toLowerCase().includes(q) ? 0.5 : 0));
-    const pool = candidateTags.filter(t => t.toLowerCase().includes(q));
-    return pool.sort((a,b)=> score(b)-score(a)).slice(0, 10);
-  }, [tagInput, candidateTags, freq, tags]);
+  // Live forslag: (1) smarte forslag fra brødtekst, (2) kontekst ved markøren, (3) eksplisitt input-boks
+  const smartSuggestions = useMemo(() => {
+    // Kandidater = ord i teksten + kjente tagger som overlapper ordene
+    const fromText = Object.keys(tokenFreq);
+    const set = new Set<string>(fromText);
+    // inkluder kjente tagger
+    knownTags.forEach(t => set.add(t));
+
+    // score: freq i tekst + boost for eksisterende tagger + co-occurrence + liten lengdebonus
+    const score = (t: string) =>
+      (tokenFreq[t] || 0) * 1.0 +
+      (knownFreq[t] ? 3 : 0) +
+      coScore(t) * 2 +
+      Math.min(0.4, Math.max(0, (t.length - 2)) * 0.02);
+
+    const out = Array.from(set)
+      .filter(t => !tags.includes(t))
+      .sort((a,b) => score(b) - score(a))
+      .slice(0, 10);
+    return out;
+  }, [tokenFreq, knownTags, knownFreq, tags]);
 
   const contextualSuggestions = useMemo(() => {
     const w = (cursorWord || '').toLowerCase();
     if (!w || w.length < 2) return [] as string[];
-    const score = (t: string) => (freq[t] || 0) + 2 * coScore(t) + (t.toLowerCase().startsWith(w) ? 2 : (t.toLowerCase().includes(w) ? 0.5 : 0));
-    const pool = candidateTags.filter(t => t.toLowerCase().includes(w));
+    const pool = Array.from(knownTags).filter(t => t.toLowerCase().includes(w));
+    // Boost prefix
+    const score = (t: string) => (knownFreq[t] || 0) + (t.toLowerCase().startsWith(w) ? 2 : (t.toLowerCase().includes(w) ? 0.5 : 0)) + coScore(t);
     return pool.sort((a,b)=> score(b)-score(a)).slice(0, 8);
-  }, [cursorWord, candidateTags, freq, tags]);
+  }, [cursorWord, knownTags, knownFreq, tags]);
+
+  const inputSuggestions = useMemo(() => {
+    const q = tagInput.trim().toLowerCase();
+    if (!q) return [] as string[];
+    const pool = Array.from(knownTags).filter(t => t.toLowerCase().includes(q));
+    const score = (t: string) => (knownFreq[t] || 0) + 3 * coScore(t) + (t.toLowerCase().startsWith(q) ? 2 : (t.toLowerCase().includes(q) ? 0.5 : 0));
+    return pool.sort((a,b)=> score(b)-score(a)).slice(0, 10);
+  }, [tagInput, knownTags, knownFreq, tags]);
 
   return (
     <div className="editcard">
+      {/* TAGGER OVER NOTATET */}
+      <div className="tags">
+        {tags.map(t => (<TagPill key={t} tag={t} onRemove={() => removeTag(t)} />))}
+      </div>
+
+      {/* BILDE */}
       {image && <img src={image} alt="" />}
+
+      {/* TITTEL */}
       <div className="small">Tittel (auto):</div>
       <div style={{ fontWeight: 700, marginTop: 4 }}>{title || '(uten tittel)'}</div>
 
+      {/* BODY */}
       <textarea
         ref={textRef}
         value={body}
@@ -255,32 +294,37 @@ function EditCard({
         onSelect={handleSelectOrInput}
         onKeyUp={handleSelectOrInput}
         placeholder="Skriv notat…"
-        style={{ width: '100%', minHeight: 160, padding: 10, borderRadius: 10 }}
+        style={{ width: '100%', minHeight: 180, padding: 10, borderRadius: 12 }}
       />
 
-      {/* Quick action when selecting a word */}
+      {/* RASK CHIP PÅ MARKERT ORD */}
       {selectedWord && selectedWord.length > 0 && (
         <div className="suggestion-bar">
-          <button className="suggestion-pill" onClick={() => { addTag(selectedWord); setSelectedWord(null); }}>Legg til tagg: {selectedWord}</button>
+          <button className="suggestion-pill" onClick={() => { addTag(selectedWord); setSelectedWord(null); }}>
+            Legg til tagg: {selectedWord}
+          </button>
         </div>
       )}
 
-      {/* Contextual suggestions while typing */}
-      {contextualSuggestions.length > 0 && (
+      {/* LIVE FORSLAG RETT UNDER NOTATET (fra tekst + kjente tagger) */}
+      {smartSuggestions.length > 0 && (
         <div className="suggestion-bar">
-          {contextualSuggestions.map(t => (
-            <button key={t} className="suggestion-pill" onClick={() => addTag(t)}>#{t}</button>
+          {smartSuggestions.map(t => (
+            <button key={t} className="suggestion-pill" onClick={() => addTag(t)}>{t}</button>
           ))}
         </div>
       )}
 
-      <div className="small">Tagger</div>
-      <div className="tag-suggestion-list">
-        {tags.map(t => (
-          <TagPill key={t} tag={t} onRemove={() => removeTag(t)} />
-        ))}
-      </div>
+      {/* KONTEKST BASERT PÅ ORD VED MARKØREN */}
+      {contextualSuggestions.length > 0 && (
+        <div className="suggestion-bar">
+          {contextualSuggestions.map(t => (
+            <button key={t} className="suggestion-pill" onClick={() => addTag(t)}>{t}</button>
+          ))}
+        </div>
+      )}
 
+      {/* EKSPISITT INPUTBOKS FOR TAGG */}
       <div className="row" style={{ marginTop: 6 }}>
         <input className="input" placeholder="Legg til tagg…" value={tagInput}
           onChange={(e) => setTagInput(e.target.value)}
@@ -288,17 +332,19 @@ function EditCard({
         <button className="ghost" onClick={() => addTag(tagInput)}>Legg til</button>
       </div>
       {inputSuggestions.length > 0 && (
-        <div className="tag-suggestion-list">
+        <div className="suggestion-bar">
           {inputSuggestions.map(t => (
-            <TagPill key={t} tag={t} onClick={() => addTag(t)} />
+            <button key={t} className="suggestion-pill" onClick={() => addTag(t)}>{t}</button>
           ))}
         </div>
       )}
 
+      {/* BILDEVELGER */}
       <div className="row" style={{ marginTop: 8 }}>
         <input id="filepick" type="file" accept="image/*" onChange={onPickFile} />
       </div>
 
+      {/* HANDLINGER */}
       <div className="edit-actions">
         <button className="ghost" onClick={() => onDelete(note.id)}>Slett</button>
         <div style={{ display: 'flex', gap: 8 }}>
@@ -317,8 +363,11 @@ export default function App() {
 
   const { direct, related } = useMemo(() => directAndRelatedNotes(notes, selected), [notes, selected]);
 
-  // Feed order: oldest -> newest (newest at the bottom)
-  const baseOrder = useMemo(() => notes.slice().sort((a,b)=> (a.updatedAt||a.createdAt)-(b.updatedAt||b.createdAt)), [notes]);
+  // Feed: eldst øverst → nyest nederst
+  const baseOrder = useMemo(
+    () => notes.slice().sort((a,b)=> (a.updatedAt||a.createdAt)-(b.updatedAt||b.createdAt)),
+    [notes]
+  );
 
   const visible = useMemo(() => {
     if (selected.length === 0) return baseOrder;
@@ -330,21 +379,17 @@ export default function App() {
   function addNote() {
     const now = Date.now();
     const n: Note = { id: uid(), title: '', body: '', tags: selected.slice(), createdAt: now, updatedAt: now };
-    // push to the end (newest at bottom)
-    setNotes([...notes, n]);
+    setNotes([...notes, n]);        // nederst i feed
     setEditingId(n.id);
   }
-
   function saveNote(n: Note) {
     setNotes(notes.map(x => x.id === n.id ? n : x));
     setEditingId(null);
   }
-
   function deleteNote(id: string) {
     setNotes(notes.filter(n => n.id !== id));
     setEditingId(null);
   }
-
   function addTagToDraft(t: string) {
     if (!editingId) return;
     const tag = t.trim(); if (!tag) return;
@@ -353,7 +398,13 @@ export default function App() {
 
   return (
     <div className="app">
-      <TopBar notes={notes} selected={selected} setSelected={setSelected} draftOpen={!!editingId} onAddTagToDraft={addTagToDraft} />
+      <TopBar
+        notes={notes}
+        selected={selected}
+        setSelected={setSelected}
+        draftOpen={!!editingId}
+        onAddTagToDraft={addTagToDraft}
+      />
 
       <div className="container">
         {selected.length > 0 && (
@@ -365,9 +416,18 @@ export default function App() {
           {visible.map(n => (
             <div key={n.id}>
               {editingId === n.id ? (
-                <EditCard note={n} onSave={saveNote} onDelete={deleteNote} onCancel={() => setEditingId(null)} />
+                <EditCard
+                  note={n}
+                  onSave={saveNote}
+                  onDelete={deleteNote}
+                  onCancel={() => setEditingId(null)}
+                />
               ) : (
-                <ReadCard note={n} onEdit={() => setEditingId(n.id)} onClickTag={(t) => setSelected(prev => prev.includes(t) ? prev : [...prev, t])} />
+                <ReadCard
+                  note={n}
+                  onEdit={() => setEditingId(n.id)}
+                  onClickTag={(t) => setSelected(prev => prev.includes(t) ? prev : [...prev, t])}
+                />
               )}
             </div>
           ))}
