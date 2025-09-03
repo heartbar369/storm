@@ -1,20 +1,16 @@
-const CACHE_NAME = 'storm-cache-v1';
-const CORE_ASSETS = [
-  '/',
-  '/index.html',
-  '/manifest.webmanifest'
-];
+const CACHE_NAME = 'storm-cache-v2';
+const CORE_ASSETS = ['/', '/index.html', '/manifest.webmanifest'];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(CORE_ASSETS))
-  );
+  event.waitUntil(caches.open(CACHE_NAME).then((c) => c.addAll(CORE_ASSETS)));
   self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) => Promise.all(keys.map((k) => k !== CACHE_NAME && caches.delete(k))))
+    caches.keys().then((keys) =>
+      Promise.all(keys.map((k) => (k !== CACHE_NAME ? caches.delete(k) : Promise.resolve())))
+    )
   );
   self.clients.claim();
 });
@@ -22,14 +18,18 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const req = event.request;
 
-  // Network-first for navigations (so we get fresh app shell when online)
+  // SPA app-shell for navigations: network-first, fall back to index.html on error/4xx/5xx
   if (req.mode === 'navigate') {
     event.respondWith(
-      fetch(req).then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE_NAME).then((c) => c.put('/index.html', copy));
-        return res;
-      }).catch(() => caches.match('/index.html'))
+      fetch(req)
+        .then((res) => {
+          if (!res.ok) return caches.match('/index.html');
+          // keep a fresh copy of index.html
+          const copy = res.clone();
+          caches.open(CACHE_NAME).then((c) => c.put('/index.html', copy));
+          return res;
+        })
+        .catch(() => caches.match('/index.html'))
     );
     return;
   }
