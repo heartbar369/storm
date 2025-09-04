@@ -15,6 +15,8 @@ function useDebouncedSave(notes: Note[]) {
   useEffect(() => { save(notes); }, [notes, save]);
 }
 
+/* ---------- tekst / tags ---------- */
+
 const STOP = new Set([
   'og','i','på','til','det','en','et','jeg','du','vi','dere','er','som','av','med','for','ikke','å','eller','men','de','der','den',
   'the','a','an','of','in','on','to','is','are','be','as','at','by','for','and','or','not'
@@ -25,26 +27,73 @@ function extractTokens(text: string): string[] {
   return Array.from(new Set(m.filter(w => w.length >= 2 && !STOP.has(w) && !/^\d+$/.test(w))));
 }
 
-// Best-effort og:image fetch → dataURL
-async function tryFetchOgImage(url: string): Promise<string | undefined> {
-  try {
-    const res = await fetch(url, { mode: 'cors' });
-    if (!res.ok) return undefined;
-    const html = await res.text();
-    const m = html.match(/<meta[^>]+property=["']og:image["'][^>]*content=["']([^"']+)["'][^>]*>/i);
-    const img = m?.[1];
-    if (!img) return undefined;
-    const ir = await fetch(img, { mode: 'cors' });
-    if (!ir.ok) return undefined;
-    const blob = await ir.blob();
-    const fr = new FileReader();
-    return await new Promise((resolve) => {
-      fr.onload = () => resolve(String(fr.result));
-      fr.onerror = () => resolve(undefined);
-      fr.readAsDataURL(blob);
-    });
-  } catch { return undefined; }
+/** Gjør http(s)://… til klikkbare lenker (uten å trigge edit-click). */
+function linkify(text: string) {
+  const re = /https?:\/\/[^\s)]+/g;
+  const parts: (string | JSX.Element)[] = [];
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) parts.push(text.slice(last, m.index));
+    const url = m[0];
+    parts.push(
+      <a
+        key={`${url}-${m.index}`}
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {url}
+      </a>
+    );
+    last = m.index + url.length;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+  return parts;
 }
+
+/* ---------- bilde fra URL (favicon/apple-touch) ---------- */
+
+/** Sjekk om et bilde-URL faktisk laster. */
+function probeImage(src: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.referrerPolicy = 'no-referrer';
+    img.crossOrigin = 'anonymous';
+    img.onload = () => resolve(true);
+    img.onerror = () => resolve(false);
+    img.src = src + (src.includes('?') ? '&' : '?') + 'v=' + Date.now();
+  });
+}
+
+/** Finn et greit representasjonsbilde for en nettside (ingen CORS-parse). */
+async function findSiteImage(url: string): Promise<string | undefined> {
+  try {
+    const u = new URL(url);
+    const origin = u.origin;
+    const host = u.hostname;
+    const candidates = [
+      `${origin}/apple-touch-icon.png`,
+      `${origin}/apple-touch-icon-precomposed.png`,
+      `${origin}/favicon-196x196.png`,
+      `${origin}/favicon-180x180.png`,
+      `${origin}/favicon-152x152.png`,
+      `${origin}/favicon-96x96.png`,
+      `${origin}/favicon-32x32.png`,
+      `${origin}/favicon.png`,
+      `${origin}/favicon.ico`,
+      // Siste utvei: Google favicon proxy
+      `https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=128`
+    ];
+    for (const src of candidates) {
+      if (await probeImage(src)) return src;
+    }
+  } catch {}
+  return undefined;
+}
+
+/* ---------- UI komponenter ---------- */
 
 function TagPill({ tag, onClick, onRemove, asButton = true }: { tag: string; onClick?: () => void; onRemove?: () => void; asButton?: boolean }) {
   const bg = ensureContrastBgForWhite(colorForTag(tag));
@@ -52,7 +101,9 @@ function TagPill({ tag, onClick, onRemove, asButton = true }: { tag: string; onC
   return (
     <El className="tagpill" style={{ background: bg }} onClick={onClick} title={tag} aria-label={tag}>
       <span>{tag}</span>
-      {onRemove && <span className="x" onClick={(e) => { e.stopPropagation(); onRemove(); }} aria-label={`Fjern ${tag}`}>×</span>}
+      {onRemove && (
+        <span className="x" onClick={(e) => { e.stopPropagation(); onRemove(); }} aria-label={`Fjern ${tag}`}>×</span>
+      )}
     </El>
   );
 }
@@ -63,7 +114,7 @@ function useNotes() {
   return { notes, setNotes } as const;
 }
 
-/* TOP BAR */
+/* TopBar (én linje, horisontal scroll) */
 function TopBar({
   notes, selected, setSelected, draftOpen, onAddTagToDraftAndFilter
 }: { notes: Note[]; selected: string[]; setSelected: (tags: string[]) => void; draftOpen: boolean; onAddTagToDraftAndFilter: (t: string) => void; }) {
@@ -104,14 +155,20 @@ function TopBar({
           {selected.map(t => (
             <TagPill key={t} tag={t} onClick={() => toggleFilterTag(t)} onRemove={() => toggleFilterTag(t)} />
           ))}
+
           <img className="logo-img" src={LOGO_PATH} alt="Storm" />
+
           <input
             className="input"
             placeholder={draftOpen ? 'Legg til tagg i notat…' : 'Søk/velg tagg…'}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') onEnter(); }}
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
           />
+
           {selected.length > 0 && (
             <button className="icon-btn" onClick={() => setSelected([])} title="Tøm filter" aria-label="Tøm filter">
               <Eraser color="var(--iconB)" strokeWidth={2.5} />
@@ -129,7 +186,7 @@ function TopBar({
   );
 }
 
-/* LESEKORT */
+/* Lesekort – klikk åpner redigering. */
 function ReadCard({ note, onEdit, onClickTag }: { note: Note; onEdit: () => void; onClickTag: (t: string) => void; }) {
   const bodyPreview = note.body.split(/\r\n|\n|\r|\u2028|\u2029/).join('\n');
   return (
@@ -141,19 +198,25 @@ function ReadCard({ note, onEdit, onClickTag }: { note: Note; onEdit: () => void
           </span>
         ))}
       </div>
+
       <div className="card-row">
         <div className="text">
           {note.title && <h3>{note.title}</h3>}
-          {bodyPreview && <p>{bodyPreview}</p>}
+          {bodyPreview && <p>{linkify(bodyPreview)}</p>}
+          {/* Ekstern lenke (hvis ikke allerede i body) */}
+          {note.body && /\bhttps?:\/\//.test(note.body) ? null : (note.imageUrl ? null : null)}
         </div>
-        {note.image && <img className="thumb" src={note.image} alt="" />}
+        {(note.imageUrl || note.image) && (
+          <img className="thumb" src={note.imageUrl || note.image!} alt="" />
+        )}
       </div>
+
       <div className="small">Oppdatert: {new Date(note.updatedAt || note.createdAt).toLocaleString()}</div>
     </div>
   );
 }
 
-/* REDIGERINGSKORT */
+/* Redigeringskort */
 function EditCard({
   note, onSave, onDelete, onCancel, onAddFilterTag
 }: {
@@ -163,18 +226,19 @@ function EditCard({
   const [tags, setTags] = useState<string[]>(note.tags);
   const [tagInput, setTagInput] = useState('');
   const [image, setImage] = useState<string | undefined>(note.image);
+  const [imageUrl] = useState<string | undefined>(note.imageUrl);
 
   const textRef = useRef<HTMLTextAreaElement | null>(null);
   const caretRef = useRef<number>(0);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   const [stickySuggestions, setStickySuggestions] = useState<string[]>([]);
+
   useEffect(() => { setBody(note.body); setTags(note.tags); setImage(note.image); }, [note.id]);
 
   const title = useMemo(() => computedTitleFromBody(body), [body]);
   const textTokens = useMemo(() => extractTokens(body), [body]);
 
-  // kjente tagger (fra alle notater), minus de som er i notatet
   const knownTags = useMemo(() => {
     const s = new Set<string>();
     try {
@@ -191,13 +255,14 @@ function EditCard({
   };
 
   function addTag(t: string) {
-    const clean = t.trim(); if (!clean) return;
+    const clean = t.trim().toLowerCase(); // <-- normaliser til lowercase
+    if (!clean) return;
     if (tags.includes(clean)) return;
     const winY = window.scrollY;
     const caret = caretRef.current;
     setTags(prev => [...prev, clean]);
     setTagInput('');
-    onAddFilterTag(clean); // legg også i top-filter
+    onAddFilterTag(clean);
     setTimeout(() => {
       const ta = textRef.current;
       if (ta) {
@@ -219,7 +284,7 @@ function EditCard({
   }
 
   function persist() {
-    onSave({ ...note, body, title, tags, image, updatedAt: Date.now() });
+    onSave({ ...note, body, title, tags, image, imageUrl, updatedAt: Date.now() });
   }
 
   useEffect(() => {
@@ -254,7 +319,6 @@ function EditCard({
     setCursorWord(w || null);
   }
 
-  // Kjente tagger (fargede) først, deretter nye ord (nøytrale)
   const computedSuggestions = useMemo(() => {
     const tokens = textTokens.filter(t => !tags.includes(t));
     const known = tokens.filter(t => knownTags.has(t));
@@ -279,7 +343,7 @@ function EditCard({
         {tags.map(t => (<TagPill key={t} tag={t} onRemove={() => removeTag(t)} />))}
       </div>
 
-      {image && <img src={image} alt="" style={{ width: '100%', height: 'auto', borderRadius: 12, border: '1px solid var(--muted)' }} />}
+      {(imageUrl || image) && <img src={imageUrl || image} alt="" style={{ width: '100%', height: 'auto', borderRadius: 12, border: '1px solid var(--muted)' }} />}
 
       <textarea
         ref={textRef}
@@ -290,7 +354,7 @@ function EditCard({
         placeholder="Skriv notat…"
       />
 
-      {/* Konstant forslag-linje (kjente fargede først) */}
+      {/* Konstant forslag-linje */}
       <div className="suggestion-fixed">
         {toShow.map(t => (
           knownTags.has(t)
@@ -300,11 +364,17 @@ function EditCard({
       </div>
 
       <div className="row" style={{ marginTop: 6 }}>
-        <input className="input" placeholder="Legg til tagg…" value={tagInput}
+        <input
+          className="input"
+          placeholder="Legg til tagg…"
+          value={tagInput}
           onChange={(e) => setTagInput(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') addTag(tagInput); }}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); addTag(tagInput); } }}
           onBlur={updateCaretRef}
           onFocus={updateCaretRef}
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
         />
         <button className="icon-btn" onClick={() => addTag(tagInput)} title="Legg til tagg" aria-label="Legg til tagg">
           <Plus color="var(--iconB)" strokeWidth={2.5} />
@@ -312,13 +382,7 @@ function EditCard({
       </div>
 
       {/* Fil + actions */}
-      <input ref={fileRef} type="file" accept="image/*" onChange={(e) => {
-        const f = e.target.files?.[0]; if (!f) return;
-        const r = new FileReader();
-        r.onload = () => setImage(String(r.result));
-        r.readAsDataURL(f);
-        e.target.value = '';
-      }} style={{ display: 'none' }} />
+      <input ref={fileRef} type="file" accept="image/*" onChange={onPickFile} style={{ display: 'none' }} />
       <div className="edit-actions">
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="icon-btn" onClick={() => fileRef.current?.click()} title="Legg til bilde" aria-label="Legg til bilde">
@@ -330,12 +394,14 @@ function EditCard({
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="icon-btn" onClick={onCancel} title="Lukk" aria-label="Lukk"><X color="var(--iconB)" strokeWidth={2.5} /></button>
-          <button className="icon-btn" onClick={() => onSave({ ...note, body, title, tags, image, updatedAt: Date.now() })} title="Lagre" aria-label="Lagre"><Check color="var(--iconB)" strokeWidth={2.5} /></button>
+          <button className="icon-btn" onClick={persist} title="Lagre" aria-label="Lagre"><Check color="var(--iconB)" strokeWidth={2.5} /></button>
         </div>
       </div>
     </div>
   );
 }
+
+/* ---------- App ---------- */
 
 export default function App() {
   const { notes, setNotes } = useNotes();
@@ -344,11 +410,13 @@ export default function App() {
 
   const { direct, related } = useMemo(() => directAndRelatedNotes(notes, selected), [notes, selected]);
 
+  // eldst -> nyest (nyest nederst)
   const baseAsc = useMemo(
     () => notes.slice().sort((a,b)=> (a.updatedAt||a.createdAt)-(b.updatedAt||b.createdAt)),
     [notes]
   );
 
+  // Ved filter: relaterte først (oppover), direkte nederst (nyeste nederst)
   const visible = useMemo(() => {
     if (selected.length === 0) return baseAsc;
     const relatedAsc = related.map(x => x.note)
@@ -358,6 +426,7 @@ export default function App() {
     return [...relatedAsc, ...directAsc];
   }, [baseAsc, direct, related, selected]);
 
+  // scroll nederst ved start
   const didInitialScroll = useRef(false);
   useEffect(() => {
     if (didInitialScroll.current) return;
@@ -370,15 +439,12 @@ export default function App() {
   function addNote(initial?: Partial<Note>) {
     const now = Date.now();
     const n: Note = {
-      id: uid(),
-      title: '',
-      body: initial?.body ?? '',
+      id: uid(), title: '', body: initial?.body ?? '',
       tags: (initial?.tags as string[])?.slice?.() ?? selected.slice(),
-      image: initial?.image,
-      createdAt: now,
-      updatedAt: now
+      image: initial?.image, imageUrl: initial?.imageUrl,
+      createdAt: now, updatedAt: now
     };
-    setNotes(prev => [...prev, n]);
+    setNotes(prev => [...prev, n]);  // nederst
     setEditingId(n.id);
   }
   function saveNote(n: Note) { setNotes(prev => prev.map(x => x.id === n.id ? n : x)); setEditingId(null); }
@@ -393,8 +459,9 @@ export default function App() {
     setSelected(prev => prev.includes(t) ? prev : [...prev, t]);
     scrollBottom();
   }
+
   function addTagToDraftAndFilter(t: string) {
-    const tag = t.trim(); if (!tag) return;
+    const tag = t.trim().toLowerCase(); // normaliser til lowercase
     if (editingId) {
       setNotes(prev => prev.map(n => n.id === editingId && !n.tags.includes(tag)
         ? { ...n, tags: [...n.tags, tag], updatedAt: Date.now() } : n));
@@ -403,7 +470,10 @@ export default function App() {
     scrollBottom();
   }
 
-  // SHARE TARGET (GET /share-target?...), opprett nytt notat
+  /* SHARE TARGET: opprett nytt notat.
+     - Tekst: behold første 5 ikke-tomme linjer.
+     - Lenke: beholdes; vises klikkbar via linkify().
+     - Bilde: finn favicon/apple-touch (ingen CORS). */
   useEffect(() => {
     const { pathname, search } = window.location;
     const p = pathname.replace(/\/+$/, ''); // trim trailing slash
@@ -417,11 +487,15 @@ export default function App() {
     if (!url && !title && !text) return;
 
     (async () => {
-      let image: string | undefined = undefined;
-      if (url) image = await tryFetchOgImage(url);
-      const body = [title, text, url].filter(Boolean).join('\n\n').trim();
-      addNote({ body, image });
-      history.replaceState(null, '', '/'); // ikke opprett på nytt ved refresh
+      // Første 5 linjer fra tekst
+      const lines = (text || '').split(/\r\n|\n|\r|\u2028|\u2029/).map(s => s.trim()).filter(Boolean).slice(0, 5);
+      const body = [title, lines.join('\n'), url].filter(Boolean).join('\n\n').trim();
+
+      let imageUrl: string | undefined = undefined;
+      if (url) imageUrl = await findSiteImage(url);
+
+      addNote({ body, imageUrl });
+      history.replaceState(null, '', '/'); // ikke repeter ved refresh
       scrollBottom();
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -436,6 +510,7 @@ export default function App() {
         draftOpen={!!editingId}
         onAddTagToDraftAndFilter={addTagToDraftAndFilter}
       />
+
       <div className="container">
         <div className="feed">
           {visible.map(n => (
@@ -446,7 +521,7 @@ export default function App() {
                   onSave={saveNote}
                   onDelete={deleteNote}
                   onCancel={() => setEditingId(null)}
-                  onAddFilterTag={(t) => { setSelected(prev => prev.includes(t) ? prev : [...prev, t]); scrollBottom(); }}
+                  onAddFilterTag={(t) => { const tag = t.toLowerCase(); setSelected(prev => prev.includes(tag) ? prev : [...prev, tag]); scrollBottom(); }}
                 />
               ) : (
                 <ReadCard
@@ -459,6 +534,7 @@ export default function App() {
           ))}
         </div>
       </div>
+
       <button className="fab" title="Nytt notat" aria-label="Nytt notat" onClick={() => addNote()}>
         <Plus color="var(--iconB)" strokeWidth={3} />
       </button>

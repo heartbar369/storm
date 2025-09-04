@@ -3,11 +3,13 @@ export type Note = {
   title: string;
   body: string;
   tags: string[];
-  image?: string; // dataURL
-  createdAt: number; // ms
-  updatedAt: number; // ms
+  /** Lokalt opplastet bilde som dataURL */
+  image?: string;
+  /** Ekstern bilde-URL (f.eks. favicon/apple-touch-icon fra delt nettside) */
+  imageUrl?: string;
+  createdAt: number;
+  updatedAt: number;
 };
 
-export type TagIndex = Record<string, Set<string>>; // tag -> noteIds
-
-export type TagColorMap = Record<string, string>; // tag -> hex
+export type TagIndex = Record<string, Set<string>>;
+export type TagColorMap = Record<string, string>;

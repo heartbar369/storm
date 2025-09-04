@@ -156,3 +156,11 @@ input, textarea { color: var(--text); background: #0b1220; border: 1px solid var
 
 /* Inline editor – knapperad */
 .edit-actions { display: flex; gap: 8px; justify-content: space-between; align-items: center; }
+
+.text a, .card a {
+  color: var(--iconB);
+  text-decoration: underline;
+}
+.text a:hover, .card a:hover {
+  opacity: .9;
+}
