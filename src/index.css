@@ -41,7 +41,7 @@ input, textarea { color: var(--text); background: #0b1220; border: 1px solid var
   border: 1px solid #263043;
 }
 
-/* App-logo ved søkefeltet (om du bruker den) */
+/* App-logo ved søkefeltet (valgfri) */
 .logo-img {
   width: 22px; height: 22px; border-radius: 6px; object-fit: cover;
   box-shadow: 0 0 0 1px rgba(255,255,255,.08) inset;
@@ -78,11 +78,25 @@ input, textarea { color: var(--text); background: #0b1220; border: 1px solid var
 .tagpill .x { opacity: .85; font-weight: 700; }
 .tagpill .x:hover { opacity: 1; }
 
-/* Forslag under skriving (i notat) */
-.suggestion-bar { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+/* Forslag – VISUELT FAST LINJE UNDER NOTAT */
+.suggestion-fixed {
+  display: block;
+  overflow-x: auto;
+  white-space: nowrap;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--muted);
+  min-height: 44px; /* holder linje synlig selv når datasettet skifter */
+}
 .suggestion-pill {
-  border: 1px solid var(--muted); border-radius: 999px; padding: 6px 10px; background: #0f172a;
-  color: #e5e7eb; font-weight: 600;
+  display: inline-flex; align-items: center;
+  margin-right: 8px;
+  border: 2px solid rgba(255,255,255,0.92); /* tydelig hvit ramme */
+  border-radius: 999px;
+  padding: 6px 12px;
+  background: #0f172a;
+  color: #e5e7eb;
+  font-weight: 700;
 }
 
 /* PAGE CONTAINER */
@@ -99,7 +113,6 @@ input, textarea { color: var(--text); background: #0b1220; border: 1px solid var
   background: var(--panel); border: 1px solid var(--muted); border-radius: 16px; padding: 12px;
   display: flex; flex-direction: column; gap: 10px; box-shadow: 0 6px 24px rgba(0,0,0,.18);
   width: 100%;
-  cursor: pointer; /* klikk for å redigere */
 }
 .card:hover { border-color: #334155; }
 .card h3 { margin: 0; font-size: 18px; }
@@ -143,6 +156,3 @@ input, textarea { color: var(--text); background: #0b1220; border: 1px solid var
 
 /* Inline editor – knapperad */
 .edit-actions { display: flex; gap: 8px; justify-content: space-between; align-items: center; }
-
-/* Deaktiver markørhånd for klikkområder som ikke skal trigge redigering */
-.card .tags * { cursor: pointer; }
