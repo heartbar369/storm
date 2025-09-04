@@ -13,9 +13,8 @@
     { "src": "/icons/apple-touch-icon.png", "sizes": "180x180", "type": "image/png", "purpose": "any" }
   ],
 
-  /* Android: gjør appen til "Del til"-mål for lenker/tekst */
   "share_target": {
-    "action": "/share",
+    "action": "/share-target",
     "method": "GET",
     "enctype": "application/x-www-form-urlencoded",
     "params": {
