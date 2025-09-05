@@ -11,7 +11,12 @@
 
 *{box-sizing:border-box}
 html,body,#root{height:100%}
-body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;}
+body{
+  margin:0;
+  background:var(--bg);
+  color:var(--fg);
+  font:14px/1.5 system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+}
 
 .app{min-height:100%;padding-top:var(--topbar-h);}
 .container{max-width:920px;margin:0 auto;padding:10px 12px;}
@@ -21,11 +26,14 @@ body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 system-ui,Segoe
 /* ---------- topbar ---------- */
 .topbar{
   position:fixed;top:0;left:0;right:0;height:var(--topbar-h);
-  background:rgba(10,15,25,.9);backdrop-filter: blur(8px);
-  border-bottom:1px solid var(--muted);z-index:10;
+  background:rgba(10,15,25,.9);
+  backdrop-filter: blur(8px);
+  border-bottom:1px solid var(--muted);
+  z-index:10;
 }
 .topbar-inner{
-  height:100%;display:flex;flex-direction:column;justify-content:center;
+  height:100%;
+  display:flex;flex-direction:column;justify-content:center;
   max-width:920px;margin:0 auto;padding:6px 12px;
 }
 .logo-btn{display:flex;align-items:center;justify-content:center;border:none;background:transparent;padding:0;cursor:pointer}
@@ -39,6 +47,8 @@ body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 system-ui,Segoe
   width:40px;height:40px;border-radius:10px;border:1px solid var(--muted);
   background:#0f172a;cursor:pointer;
 }
+
+/* én linje – horisontal scroll for forslag/tagger */
 .topbar-tags{
   margin-top:6px;display:flex;gap:6px;overflow:auto;white-space:nowrap;scrollbar-width:none;
 }
@@ -54,18 +64,35 @@ body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 system-ui,Segoe
 .text p{margin:6px 0 0}
 h3{margin:0 0 4px;font-size:16px}
 
+/* tagger */
 .tags{display:flex;flex-wrap:wrap;gap:6px}
 .tagpill{
-  display:inline-flex;align-items:center;gap:6px;border:none;border-radius:999px;padding:4px 10px;cursor:pointer;color:#fff;
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  border:none;
+  border-radius:999px;
+  padding:6px 12px;     /* større chip-størrelse */
+  font-weight:600;      /* matcher valgte tagger */
+  color:#fff;
+  cursor:pointer;
 }
 .tagpill .x{margin-left:4px;opacity:.9}
 .tagpill .x:hover{opacity:1}
 
-/* forslag-linje i editor og toppbar-søk */
-.suggestion-fixed,.tag-suggestion-list{display:flex;gap:6px;overflow:auto;white-space:nowrap;scrollbar-width:none}
+/* forslag-linjer */
+.suggestion-fixed,.tag-suggestion-list{
+  display:flex;gap:6px;overflow:auto;white-space:nowrap;scrollbar-width:none
+}
 .suggestion-fixed::-webkit-scrollbar,.tag-suggestion-list::-webkit-scrollbar{display:none}
 .suggestion-pill{
-  background:transparent;color:#fff;border:2px solid #ffffff55;border-radius:999px;padding:4px 10px;cursor:pointer;
+  background:transparent;
+  color:#fff;
+  border:2px solid #ffffff55; /* tydelig hvit kant */
+  border-radius:999px;
+  padding:6px 12px;           /* harmoniser med tagpill */
+  font-weight:600;
+  cursor:pointer;
 }
 
 /* editor */
@@ -81,7 +108,7 @@ textarea{
   background:#0f172a;box-shadow:0 4px 18px rgba(0,0,0,.35);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;
 }
 
-/* infobox */
+/* infobox (versjon) */
 .infobox{
   position:fixed;top:68px;left:0;right:0;display:flex;justify-content:center;z-index:20;
 }
@@ -89,6 +116,6 @@ textarea{
   background:#0f172a;border:1px solid var(--muted);border-radius:12px;padding:10px 12px;min-width:220px;
 }
 
-/* links */
+/* lenker i kort/tekst */
 .text a, .card a { color: var(--iconB); text-decoration: underline; }
 .text a:hover, .card a:hover { opacity:.9; }

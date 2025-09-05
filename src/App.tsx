@@ -247,8 +247,7 @@ function EditCard({
 
   function addTag(t: string) {
     const clean = t.trim().toLowerCase();
-    if (!clean) return;
-    if (tags.includes(clean)) return;
+    if (!clean || tags.includes(clean)) return;
     const winY = window.scrollY;
     const caret = caretRef.current;
     setTags(prev => [...prev, clean]);
@@ -264,25 +263,33 @@ function EditCard({
 
   function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]; if (!f) return;
+    const winY = window.scrollY;
+    const caret = caretRef.current; // ta vare på caret før lesing
     const reader = new FileReader();
     reader.onload = () => {
-      setImage(String(reader.result));
-      // lagre som utkast (ikke lukk)
-      onSaveDraft({ ...note, body, title, tags, image: String(reader.result), updatedAt: Date.now() });
+      const data = String(reader.result);
+      setImage(data);
+      // lagre som utkast (IKKE lukk)
+      onSaveDraft({ ...note, body, title, tags, image: data, updatedAt: Date.now() });
+      // gi fokus tilbake til tekstfeltet på samme sted, og behold scroll
+      setTimeout(() => {
+        const ta = textRef.current;
+        if (ta) {
+          ta.focus();
+          try { ta.setSelectionRange(caret, caret); } catch {}
+        }
+        window.scrollTo({ top: winY });
+      }, 0);
     };
     reader.onerror = () => {};
     reader.readAsDataURL(f);
     e.target.value = '';
   }
 
-  function saveDraft() {
-    onSaveDraft({ ...note, body, title, tags, image, updatedAt: Date.now() });
-  }
-  function saveAndClose() {
-    onSave({ ...note, body, title, tags, image, updatedAt: Date.now() });
-  }
+  function saveDraft() { onSaveDraft({ ...note, body, title, tags, image, updatedAt: Date.now() }); }
+  function saveAndClose() { onSave({ ...note, body, title, tags, image, updatedAt: Date.now() }); }
 
-  // kun før vi forlater siden: lagre utkast (ikke lukk)
+  // lagre utkast når man forlater siden
   useEffect(() => {
     const handler = () => { saveDraft(); };
     window.addEventListener('beforeunload', handler);
@@ -317,10 +324,7 @@ function EditCard({
     return [...knownSorted, ...freshSorted].slice(0, 40);
   }, [textTokens, tags, knownTags, cursorWord, tagInput]);
 
-  useEffect(() => {
-    if (computedSuggestions.length > 0) setStickySuggestions(computedSuggestions);
-  }, [computedSuggestions]);
-
+  useEffect(() => { if (computedSuggestions.length > 0) setStickySuggestions(computedSuggestions); }, [computedSuggestions]);
   const toShow = computedSuggestions.length > 0 ? computedSuggestions : stickySuggestions;
 
   return (
@@ -361,16 +365,21 @@ function EditCard({
           onFocus={updateCaretRef}
           autoCapitalize="none" autoCorrect="off" spellCheck={false}
         />
-        <button className="icon-btn" onClick={() => addTag(tagInput)} title="Legg til tagg" aria-label="Legg til tagg">
-          <Plus color="var(--iconB)" strokeWidth={2.5} />
+        <button
+          className="icon-btn"
+          onClick={() => { updateCaretRef(); fileRef.current?.click(); }}  // <-- behold caret før vi åpner velger
+          title="Legg til bilde" aria-label="Legg til bilde"
+        >
+          <ImagePlus color="var(--iconB)" strokeWidth={2.5} />
         </button>
       </div>
 
-      {/* Skjult fil-input + knapp */}
+      {/* Skjult fil-input */}
       <input ref={fileRef} type="file" accept="image/*" onChange={onPickFile} style={{ display: 'none' }} />
+
       <div className="edit-actions">
         <div style={{ display: 'flex', gap: 8 }}>
-          <button className="icon-btn" onClick={() => fileRef.current?.click()} title="Legg til bilde" aria-label="Legg til bilde">
+          <button className="icon-btn" onClick={() => { updateCaretRef(); fileRef.current?.click(); }} title="Legg til bilde" aria-label="Legg til bilde">
             <ImagePlus color="var(--iconB)" strokeWidth={2.5} />
           </button>
           <button className="icon-btn" onClick={() => onDelete(note.id)} title="Slett notat" aria-label="Slett notat">
@@ -379,12 +388,13 @@ function EditCard({
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="icon-btn" onClick={onCancel} title="Lukk" aria-label="Lukk"><X color="var(--iconB)" strokeWidth={2.5} /></button>
-          <button className="icon-btn" onClick={saveAndClose} title="Lagre" aria-label="Lagre"><Check color="var(--iconB)" strokeWidth={2.5} /></button>
+          <button className="icon-btn" onClick={() => onSave({ ...note, body, title, tags, image, updatedAt: Date.now() })} title="Lagre" aria-label="Lagre"><Check color="var(--iconB)" strokeWidth={2.5} /></button>
         </div>
       </div>
     </div>
   );
 }
+
 
 /* ---------- APP ---------- */
 export default function App() {
