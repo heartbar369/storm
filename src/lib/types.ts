@@ -5,7 +5,7 @@ export type Note = {
   tags: string[];
   /** Lokalt opplastet bilde som dataURL */
   image?: string;
-  /** Ekstern bilde-URL (f.eks. favicon/apple-touch-icon fra delt nettside) */
+  /** Ekstern bilde-URL (f.eks. favicon/apple-touch fra delt nettside) */
   imageUrl?: string;
   createdAt: number;
   updatedAt: number;

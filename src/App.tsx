@@ -15,19 +15,13 @@ function useDebouncedSave(notes: Note[]) {
   useEffect(() => { save(notes); }, [notes, save]);
 }
 
-/* ---------- tekst / tags ---------- */
-
-const STOP = new Set([
-  'og','i','på','til','det','en','et','jeg','du','vi','dere','er','som','av','med','for','ikke','å','eller','men','de','der','den',
-  'the','a','an','of','in','on','to','is','are','be','as','at','by','for','and','or','not'
-]);
+const STOP = new Set(['og','i','på','til','det','en','et','jeg','du','vi','dere','er','som','av','med','for','ikke','å','eller','men','de','der','den','the','a','an','of','in','on','to','is','are','be','as','at','by','for','and','or','not']);
 
 function extractTokens(text: string): string[] {
   const m = text.toLowerCase().match(/[\p{L}\p{N}_-]+/gu) || [];
   return Array.from(new Set(m.filter(w => w.length >= 2 && !STOP.has(w) && !/^\d+$/.test(w))));
 }
 
-/** Gjør http(s)://… til klikkbare lenker (uten å trigge edit-click). */
 function linkify(text: string) {
   const re = /https?:\/\/[^\s)]+/g;
   const parts: (string | JSX.Element)[] = [];
@@ -37,15 +31,7 @@ function linkify(text: string) {
     if (m.index > last) parts.push(text.slice(last, m.index));
     const url = m[0];
     parts.push(
-      <a
-        key={`${url}-${m.index}`}
-        href={url}
-        target="_blank"
-        rel="noopener noreferrer"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {url}
-      </a>
+      <a key={`${url}-${m.index}`} href={url} target="_blank" rel="noopener noreferrer" onClick={(e)=>e.stopPropagation()}>{url}</a>
     );
     last = m.index + url.length;
   }
@@ -53,9 +39,7 @@ function linkify(text: string) {
   return parts;
 }
 
-/* ---------- bilde fra URL (favicon/apple-touch) ---------- */
-
-/** Sjekk om et bilde-URL faktisk laster. */
+/* ---- Favicon/apple-touch fallback for delt URL ---- */
 function probeImage(src: string): Promise<boolean> {
   return new Promise((resolve) => {
     const img = new Image();
@@ -66,8 +50,6 @@ function probeImage(src: string): Promise<boolean> {
     img.src = src + (src.includes('?') ? '&' : '?') + 'v=' + Date.now();
   });
 }
-
-/** Finn et greit representasjonsbilde for en nettside (ingen CORS-parse). */
 async function findSiteImage(url: string): Promise<string | undefined> {
   try {
     const u = new URL(url);
@@ -83,17 +65,12 @@ async function findSiteImage(url: string): Promise<string | undefined> {
       `${origin}/favicon-32x32.png`,
       `${origin}/favicon.png`,
       `${origin}/favicon.ico`,
-      // Siste utvei: Google favicon proxy
       `https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=128`
     ];
-    for (const src of candidates) {
-      if (await probeImage(src)) return src;
-    }
+    for (const src of candidates) if (await probeImage(src)) return src;
   } catch {}
   return undefined;
 }
-
-/* ---------- UI komponenter ---------- */
 
 function TagPill({ tag, onClick, onRemove, asButton = true }: { tag: string; onClick?: () => void; onRemove?: () => void; asButton?: boolean }) {
   const bg = ensureContrastBgForWhite(colorForTag(tag));
@@ -101,9 +78,7 @@ function TagPill({ tag, onClick, onRemove, asButton = true }: { tag: string; onC
   return (
     <El className="tagpill" style={{ background: bg }} onClick={onClick} title={tag} aria-label={tag}>
       <span>{tag}</span>
-      {onRemove && (
-        <span className="x" onClick={(e) => { e.stopPropagation(); onRemove(); }} aria-label={`Fjern ${tag}`}>×</span>
-      )}
+      {onRemove && <span className="x" onClick={(e) => { e.stopPropagation(); onRemove(); }} aria-label={`Fjern ${tag}`}>×</span>}
     </El>
   );
 }
@@ -114,7 +89,7 @@ function useNotes() {
   return { notes, setNotes } as const;
 }
 
-/* TopBar (én linje, horisontal scroll) */
+/* ---------- TOP BAR ---------- */
 function TopBar({
   notes, selected, setSelected, draftOpen, onAddTagToDraftAndFilter
 }: { notes: Note[]; selected: string[]; setSelected: (tags: string[]) => void; draftOpen: boolean; onAddTagToDraftAndFilter: (t: string) => void; }) {
@@ -137,14 +112,16 @@ function TopBar({
       window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' });
     });
   }
-  function toggleFilterTag(t: string) {
+  function toggleFilterTag(raw: string) {
+    const t = raw.trim().toLowerCase();
     setSelected(selected.includes(t) ? selected.filter(x => x !== t) : [...selected, t]);
     scrollBottom();
   }
   function onEnter() {
     const top = (typeahead[0] || input.trim());
     if (!top) return;
-    if (draftOpen) onAddTagToDraftAndFilter(top); else toggleFilterTag(top);
+    if (draftOpen) onAddTagToDraftAndFilter(top);
+    else toggleFilterTag(top);
     setInput('');
   }
 
@@ -155,20 +132,15 @@ function TopBar({
           {selected.map(t => (
             <TagPill key={t} tag={t} onClick={() => toggleFilterTag(t)} onRemove={() => toggleFilterTag(t)} />
           ))}
-
           <img className="logo-img" src={LOGO_PATH} alt="Storm" />
-
           <input
             className="input"
             placeholder={draftOpen ? 'Legg til tagg i notat…' : 'Søk/velg tagg…'}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') onEnter(); }}
-            autoCapitalize="none"
-            autoCorrect="off"
-            spellCheck={false}
+            autoCapitalize="none" autoCorrect="off" spellCheck={false}
           />
-
           {selected.length > 0 && (
             <button className="icon-btn" onClick={() => setSelected([])} title="Tøm filter" aria-label="Tøm filter">
               <Eraser color="var(--iconB)" strokeWidth={2.5} />
@@ -186,7 +158,7 @@ function TopBar({
   );
 }
 
-/* Lesekort – klikk åpner redigering. */
+/* ---------- LESEKORT ---------- */
 function ReadCard({ note, onEdit, onClickTag }: { note: Note; onEdit: () => void; onClickTag: (t: string) => void; }) {
   const bodyPreview = note.body.split(/\r\n|\n|\r|\u2028|\u2029/).join('\n');
   return (
@@ -198,30 +170,25 @@ function ReadCard({ note, onEdit, onClickTag }: { note: Note; onEdit: () => void
           </span>
         ))}
       </div>
-
       <div className="card-row">
         <div className="text">
           {note.title && <h3>{note.title}</h3>}
           {bodyPreview && <p>{linkify(bodyPreview)}</p>}
-          {/* Ekstern lenke (hvis ikke allerede i body) */}
-          {note.body && /\bhttps?:\/\//.test(note.body) ? null : (note.imageUrl ? null : null)}
         </div>
-        {(note.imageUrl || note.image) && (
-          <img className="thumb" src={note.imageUrl || note.image!} alt="" />
-        )}
+        {(note.imageUrl || note.image) && <img className="thumb" src={note.imageUrl || note.image!} alt="" />}
       </div>
-
       <div className="small">Oppdatert: {new Date(note.updatedAt || note.createdAt).toLocaleString()}</div>
     </div>
   );
 }
 
-/* Redigeringskort */
+/* ---------- REDIGERINGSKORT ---------- */
 function EditCard({
   note, onSave, onDelete, onCancel, onAddFilterTag
 }: {
   note: Note; onSave: (n: Note) => void; onDelete: (id: string) => void; onCancel: () => void; onAddFilterTag: (t: string) => void;
 }) {
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
   const [body, setBody] = useState(note.body);
   const [tags, setTags] = useState<string[]>(note.tags);
   const [tagInput, setTagInput] = useState('');
@@ -239,6 +206,7 @@ function EditCard({
   const title = useMemo(() => computedTitleFromBody(body), [body]);
   const textTokens = useMemo(() => extractTokens(body), [body]);
 
+  // kjente tagger (alle – minus de som allerede er i notatet)
   const knownTags = useMemo(() => {
     const s = new Set<string>();
     try {
@@ -249,26 +217,31 @@ function EditCard({
     return s;
   }, [tags]);
 
+  // fokus + scroll ved åpning
+  useEffect(() => {
+    const el = wrapperRef.current;
+    if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+    const t = textRef.current;
+    if (t) { setTimeout(() => { t.focus(); t.setSelectionRange(t.value.length, t.value.length); }, 0); }
+  }, []);
+
   const updateCaretRef = () => {
     const ta = textRef.current;
     if (ta && typeof ta.selectionStart === 'number') caretRef.current = ta.selectionStart;
   };
 
   function addTag(t: string) {
-    const clean = t.trim().toLowerCase(); // <-- normaliser til lowercase
+    const clean = t.trim().toLowerCase(); // normaliser
     if (!clean) return;
     if (tags.includes(clean)) return;
     const winY = window.scrollY;
     const caret = caretRef.current;
     setTags(prev => [...prev, clean]);
     setTagInput('');
-    onAddFilterTag(clean);
+    onAddFilterTag(clean); // legg også i top-filter
     setTimeout(() => {
       const ta = textRef.current;
-      if (ta) {
-        ta.focus();
-        try { ta.setSelectionRange(caret, caret); } catch {}
-      }
+      if (ta) { ta.focus(); try { ta.setSelectionRange(caret, caret); } catch {} }
       window.scrollTo({ top: winY });
     }, 0);
   }
@@ -337,7 +310,7 @@ function EditCard({
   const toShow = computedSuggestions.length > 0 ? computedSuggestions : stickySuggestions;
 
   return (
-    <div className="editcard" onClick={(e) => e.stopPropagation()} role="group" aria-label="Rediger notat">
+    <div ref={wrapperRef} className="editcard" onClick={(e) => e.stopPropagation()} role="group" aria-label="Rediger notat">
       {/* valgte tagger øverst */}
       <div className="tags">
         {tags.map(t => (<TagPill key={t} tag={t} onRemove={() => removeTag(t)} />))}
@@ -372,16 +345,14 @@ function EditCard({
           onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); addTag(tagInput); } }}
           onBlur={updateCaretRef}
           onFocus={updateCaretRef}
-          autoCapitalize="none"
-          autoCorrect="off"
-          spellCheck={false}
+          autoCapitalize="none" autoCorrect="off" spellCheck={false}
         />
         <button className="icon-btn" onClick={() => addTag(tagInput)} title="Legg til tagg" aria-label="Legg til tagg">
           <Plus color="var(--iconB)" strokeWidth={2.5} />
         </button>
       </div>
 
-      {/* Fil + actions */}
+      {/* Skjult fil-input + knapp (robust på mobil) */}
       <input ref={fileRef} type="file" accept="image/*" onChange={onPickFile} style={{ display: 'none' }} />
       <div className="edit-actions">
         <div style={{ display: 'flex', gap: 8 }}>
@@ -401,8 +372,7 @@ function EditCard({
   );
 }
 
-/* ---------- App ---------- */
-
+/* ---------- APP ---------- */
 export default function App() {
   const { notes, setNotes } = useNotes();
   const [selected, setSelected] = useState<string[]>([]);
@@ -416,36 +386,31 @@ export default function App() {
     [notes]
   );
 
-  // Ved filter: relaterte først (oppover), direkte nederst (nyeste nederst)
   const visible = useMemo(() => {
     if (selected.length === 0) return baseAsc;
-    const relatedAsc = related.map(x => x.note)
-      .sort((a,b)=> (a.updatedAt||a.createdAt)-(b.updatedAt||b.createdAt));
-    const directAsc = direct.slice()
-      .sort((a,b)=> (a.updatedAt||a.createdAt)-(b.updatedAt||b.createdAt));
+    const relatedAsc = related.map(x => x.note).sort((a,b)=> (a.updatedAt||a.createdAt)-(b.updatedAt||b.createdAt));
+    const directAsc = direct.slice().sort((a,b)=> (a.updatedAt||a.createdAt)-(b.updatedAt||b.createdAt));
     return [...relatedAsc, ...directAsc];
   }, [baseAsc, direct, related, selected]);
-
-  // scroll nederst ved start
-  const didInitialScroll = useRef(false);
-  useEffect(() => {
-    if (didInitialScroll.current) return;
-    didInitialScroll.current = true;
-    setTimeout(() => {
-      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'auto' });
-    }, 0);
-  }, []);
 
   function addNote(initial?: Partial<Note>) {
     const now = Date.now();
     const n: Note = {
-      id: uid(), title: '', body: initial?.body ?? '',
+      id: uid(),
+      title: '',
+      body: initial?.body ?? '',
       tags: (initial?.tags as string[])?.slice?.() ?? selected.slice(),
-      image: initial?.image, imageUrl: initial?.imageUrl,
-      createdAt: now, updatedAt: now
+      image: initial?.image,
+      imageUrl: initial?.imageUrl,
+      createdAt: now,
+      updatedAt: now
     };
-    setNotes(prev => [...prev, n]);  // nederst
+    setNotes(prev => [...prev, n]); // nederst
     setEditingId(n.id);
+    setTimeout(() => {
+      const el = document.querySelector(`[data-note-id="${n.id}"]`);
+      (el as HTMLElement | null)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 0);
   }
   function saveNote(n: Note) { setNotes(prev => prev.map(x => x.id === n.id ? n : x)); setEditingId(null); }
   function deleteNote(id: string) { setNotes(prev => prev.filter(n => n.id !== id)); setEditingId(null); }
@@ -456,12 +421,12 @@ export default function App() {
     });
   }
   function onClickTagFilter(t: string) {
-    setSelected(prev => prev.includes(t) ? prev : [...prev, t]);
+    const tag = t.trim().toLowerCase();
+    setSelected(prev => prev.includes(tag) ? prev : [...prev, tag]);
     scrollBottom();
   }
-
   function addTagToDraftAndFilter(t: string) {
-    const tag = t.trim().toLowerCase(); // normaliser til lowercase
+    const tag = t.trim().toLowerCase();
     if (editingId) {
       setNotes(prev => prev.map(n => n.id === editingId && !n.tags.includes(tag)
         ? { ...n, tags: [...n.tags, tag], updatedAt: Date.now() } : n));
@@ -470,13 +435,10 @@ export default function App() {
     scrollBottom();
   }
 
-  /* SHARE TARGET: opprett nytt notat.
-     - Tekst: behold første 5 ikke-tomme linjer.
-     - Lenke: beholdes; vises klikkbar via linkify().
-     - Bilde: finn favicon/apple-touch (ingen CORS). */
+  // SHARE TARGET (GET /share-target?...), opprett nytt notat
   useEffect(() => {
     const { pathname, search } = window.location;
-    const p = pathname.replace(/\/+$/, ''); // trim trailing slash
+    const p = pathname.replace(/\/+$/, '');
     if (!(p === '' || p === '/' || p === '/share-target')) return;
 
     const qs = new URLSearchParams(search);
@@ -487,15 +449,12 @@ export default function App() {
     if (!url && !title && !text) return;
 
     (async () => {
-      // Første 5 linjer fra tekst
       const lines = (text || '').split(/\r\n|\n|\r|\u2028|\u2029/).map(s => s.trim()).filter(Boolean).slice(0, 5);
       const body = [title, lines.join('\n'), url].filter(Boolean).join('\n\n').trim();
-
       let imageUrl: string | undefined = undefined;
       if (url) imageUrl = await findSiteImage(url);
-
       addNote({ body, imageUrl });
-      history.replaceState(null, '', '/'); // ikke repeter ved refresh
+      history.replaceState(null, '', '/');
       scrollBottom();
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -514,7 +473,7 @@ export default function App() {
       <div className="container">
         <div className="feed">
           {visible.map(n => (
-            <div key={n.id}>
+            <div key={n.id} data-note-id={n.id}>
               {editingId === n.id ? (
                 <EditCard
                   note={n}

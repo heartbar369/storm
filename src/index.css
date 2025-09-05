@@ -164,3 +164,19 @@ input, textarea { color: var(--text); background: #0b1220; border: 1px solid var
 .text a:hover, .card a:hover {
   opacity: .9;
 }
+:root {
+  --topbar-h: 68px;
+}
+
+/* gjør redigering komfortabel på mobil/skjermhøyde */
+.editcard {
+  min-height: calc(100svh - var(--topbar-h) - 24px);
+  scroll-margin-top: calc(var(--topbar-h) + 12px);
+}
+
+/* sikker knappehit-area */
+.icon-btn { min-width: 40px; min-height: 40px; }
+
+/* gjør lenker tydelige i kort */
+.text a, .card a { color: var(--iconB); text-decoration: underline; }
+.text a:hover, .card a:hover { opacity: .9; }
