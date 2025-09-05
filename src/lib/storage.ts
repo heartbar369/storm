@@ -2,8 +2,104 @@ import type { Note, TagColorMap } from './types';
 
 const NOTES_KEY = 'storm_notes';
 const TAG_COLORS_KEY = 'storm_tag_colors';
-const SEED_VERSION_KEY = 'storm_seed_version';
-const CURRENT_SEED_VERSION = '1';
+
+/* ---------------- seed-notater: behold og gjenopprett ---------------- */
+
+type SeedSpec = { title: string; bodyLines: string[]; tags: string[]; key: string };
+
+const SEEDS: SeedSpec[] = [
+  {
+    key: 'seed-welcome',
+    title: 'Velkommen til Storm',
+    bodyLines: [
+      'Velkommen!',
+      'Dette er Storm – hvor du kan lage ditt eget tankekart med tagger, ved å notere og linke.',
+      'Noter, og få forslag til tagger som relaterer.'
+    ],
+    tags: ['storm','intro']
+  },
+  {
+    key: 'seed-filter',
+    title: 'Filtrér med tagger',
+    bodyLines: [
+      'Trykk på tagger i topplinja for å filtrere notater.',
+      'Direkte treff vises nederst (nyeste nederst), relaterte over.'
+    ],
+    tags: ['storm','intro','filtre']
+  },
+  {
+    key: 'seed-share',
+    title: 'Del til Storm fra nettleseren',
+    bodyLines: [
+      'Del en artikkel fra nettleseren til Storm.',
+      'Appen oppretter et notat med tittel, de første linjene og lenke.',
+      'Prøv: Åpne en artikkel → Del → “Storm – Notater”.'
+    ],
+    tags: ['storm','del']
+  },
+  {
+    key: 'seed-image',
+    title: 'Legg til bilde i notat',
+    bodyLines: [
+      'Bruk bilde-ikonet når du redigerer for å legge til bilde. Bilder skaleres automatisk.'
+    ],
+    tags: ['storm','bilder']
+  },
+  {
+    key: 'seed-suggest',
+    title: 'Live tagg-forslag mens du skriver',
+    bodyLines: [
+      'Når du skriver, henter Storm forslag fra teksten. Kjente tagger fargekodes først; nye ord vises nøytralt.',
+      'Tips: Trykk på en forslag-chip for å legge den til – du forblir i teksten.'
+    ],
+    tags: ['storm','forslag','tag']
+  },
+  {
+    key: 'seed-pwa',
+    title: 'WebApp og lagring',
+    bodyLines: [
+      'Installer som app/Legg til på startskjermen (Android/iOS). Notater lagres lokalt og bevares på tvers av oppdateringer.'
+    ],
+    tags: ['storm','pwa','lagring']
+  },
+  {
+    key: 'seed-contact',
+    title: 'Kontakt',
+    bodyLines: [
+      'Tilbakemeldinger mottas med skål. heartbar369@gmail.com'
+    ],
+    tags: ['storm','kontakt','feedback']
+  }
+];
+
+function makeNoteFromSeed(seed: SeedSpec, createdAt: number): Note {
+  const body = [seed.title, ...seed.bodyLines].join('\n');
+  return {
+    id: seed.key,
+    title: seed.title,
+    body,
+    tags: seed.tags.map(t => t.toLowerCase()),
+    createdAt,
+    updatedAt: createdAt
+  };
+}
+
+/** Legg til manglende seed-notater (matcher på tittel) uten å duplisere eksisterende. */
+function ensureSeedNotesPresent(existing: Note[]): Note[] {
+  const now = Date.now();
+  const titles = new Set(existing.map(n => (n.title || '').trim()));
+  const missing = SEEDS.filter(s => !titles.has(s.title));
+  if (missing.length === 0) return existing;
+
+  const added: Note[] = [];
+  for (let i = 0; i < missing.length; i++) {
+    const offsetMs = (missing.length - i) * 2000 + 1000;
+    added.push(makeNoteFromSeed(missing[i], now - offsetMs));
+  }
+  return [...existing, ...added];
+}
+
+/* ---------------- basic storage utils ---------------- */
 
 export function debounce<T extends (...args: any[]) => void>(fn: T, ms = 150) {
   let t: number | undefined;
@@ -11,6 +107,26 @@ export function debounce<T extends (...args: any[]) => void>(fn: T, ms = 150) {
     if (t) window.clearTimeout(t);
     t = window.setTimeout(() => fn(...args), ms);
   };
+}
+
+export function loadNotes(): Note[] {
+  try {
+    const raw = localStorage.getItem(NOTES_KEY);
+    const arr = raw ? (JSON.parse(raw) as Note[]) : [];
+    const merged = ensureSeedNotesPresent(Array.isArray(arr) ? arr : []);
+    if (merged.length !== (arr?.length || 0)) {
+      localStorage.setItem(NOTES_KEY, JSON.stringify(merged));
+    }
+    return merged;
+  } catch {
+    const merged = ensureSeedNotesPresent([]);
+    localStorage.setItem(NOTES_KEY, JSON.stringify(merged));
+    return merged;
+  }
+}
+
+export function saveNotes(notes: Note[]) {
+  localStorage.setItem(NOTES_KEY, JSON.stringify(notes));
 }
 
 export function loadTagColors(): TagColorMap {
@@ -22,103 +138,4 @@ export function loadTagColors(): TagColorMap {
 
 export function saveTagColors(map: TagColorMap) {
   localStorage.setItem(TAG_COLORS_KEY, JSON.stringify(map));
-}
-
-function makeSeedNotes(): Note[] {
-  const now = Date.now();
-  let step = 0;
-
-  const mk = (bodyLines: string[], tags: string[]) => {
-    const body = bodyLines.join('\n').trim();
-    const title = (body.split(/\r\n|\n|\r|\u2028|\u2029/).find(l => l.trim().length > 0) || '').slice(0, 120);
-    const createdAt = now - (bodyLines.length + step++) * 1000; // sikrer rekkefølge, eldst først
-    return {
-      id: Math.random().toString(36).slice(2) + createdAt.toString(36),
-      title,
-      body,
-      tags: tags.map(t => t.trim().toLowerCase()),
-      createdAt,
-      updatedAt: createdAt
-    } as Note;
-  };
-
-  // 1) Velkommen (først/eldst)
-  const n1 = mk([
-    'Velkommen til Storm',
-    'Velkommen!',
-    'Dette er Storm – hvor du kan lage ditt eget tankekart med tagger, ved å notere og linke.',
-    'Noter, og få forslag til tagger som relaterer.'
-  ], ['storm','intro']);
-
-  // 2) Filtrér
-  const n2 = mk([
-    'Filtrér med tagger',
-    'Trykk på tagger i topplinja for å filtrere notater.',
-    'Direkte treff vises nederst (nyeste nederst), relaterte over.'
-  ], ['storm','intro','filtre']);
-
-  // 3) Del til Storm
-  const n3 = mk([
-    'Del til Storm fra nettleseren',
-    'Del en artikkel fra nettleseren til Storm.',
-    '(Virker kun på Android)',
-    'Appen oppretter et notat med tittel, de første linjene og lenke.',
-    'Prøv: Åpne en artikkel → Del → “Storm – Notater”.'
-  ], ['storm','del']);
-
-  // 4) Bilde
-  const n4 = mk([
-    'Legg til bilde i notat',
-    'Bruk bilde-ikonet når du redigerer for å legge til bilde. Bilder skaleres automatisk.'
-  ], ['storm','bilder']);
-
-  // 5) Forslag
-  const n5 = mk([
-    'Live tagg-forslag mens du skriver',
-    'Når du skriver, henter Storm forslag fra teksten. Kjente tagger fargekodes først; nye ord vises nøytralt.',
-    'Tips: Trykk på en forslag-chip for å legge den til – du forblir i teksten.'
-  ], ['storm','forslag','tag']);
-
-  // 6) PWA/Lagring
-  const n6 = mk([
-    'WebApp og lagring',
-    'Installer som app/Legg til på startskjermen (Android/iOS). Notater lagres lokalt og bevares på tvers av oppdateringer.'
-  ], ['storm','pwa','lagring']);
-
-  // 7) Kontakt
-  const n7 = mk([
-    'Kontakt',
-    'Tilbakemeldinger mottas med skål. heartbar369@gmail.com'
-  ], ['storm','kontakt','feedback']);
-
-  return [n1,n2,n3,n4,n5,n6,n7];
-}
-
-/** Laster notater. Hvis tomt og seed ikke kjørt -> seeder standardnotater én gang. */
-export function loadNotes(): Note[] {
-  try {
-    const raw = localStorage.getItem(NOTES_KEY);
-    const arr = raw ? (JSON.parse(raw) as Note[]) : [];
-    if (Array.isArray(arr) && arr.length > 0) return arr;
-
-    // tomt: seed hvis ikke gjort før
-    const ver = localStorage.getItem(SEED_VERSION_KEY);
-    if (ver !== CURRENT_SEED_VERSION) {
-      const seeded = makeSeedNotes();
-      localStorage.setItem(NOTES_KEY, JSON.stringify(seeded));
-      localStorage.setItem(SEED_VERSION_KEY, CURRENT_SEED_VERSION);
-      return seeded;
-    }
-    return [];
-  } catch {
-    // fallback: seed
-    const seeded = makeSeedNotes();
-    localStorage.setItem(NOTES_KEY, JSON.stringify(seeded));
-    localStorage.setItem(SEED_VERSION_KEY, CURRENT_SEED_VERSION);
-    return seeded;
-  }
-}
-
-export function saveNotes(notes: Note[]) {
-  localStorage.setItem(NOTES_KEY, JSON.stringify(notes));
 }

@@ -5,7 +5,8 @@ import { computedTitleFromBody } from './lib/text';
 import { colorForTag, ensureContrastBgForWhite } from './lib/tags';
 import { debounce, loadNotes, saveNotes } from './lib/storage';
 import { directAndRelatedNotes, rankTopBarTags, tagBaseScores } from './lib/rank';
-import { Plus, Check, ImagePlus, X, Eraser, Trash } from 'lucide-react';
+import { Plus, Check, ImagePlus, X, Eraser, Trash, Info } from 'lucide-react';
+import { VERSION } from './lib/version';
 
 const LOGO_PATH = '/icons/icon-192.png';
 
@@ -15,6 +16,7 @@ function useDebouncedSave(notes: Note[]) {
   useEffect(() => { save(notes); }, [notes, save]);
 }
 
+/* ---------- util ---------- */
 const STOP = new Set(['og','i','på','til','det','en','et','jeg','du','vi','dere','er','som','av','med','for','ikke','å','eller','men','de','der','den','the','a','an','of','in','on','to','is','are','be','as','at','by','for','and','or','not']);
 
 function extractTokens(text: string): string[] {
@@ -39,7 +41,7 @@ function linkify(text: string) {
   return parts;
 }
 
-/* ---- Favicon/apple-touch fallback for delt URL ---- */
+/* ---- favicon/apple-touch for delt URL ---- */
 function probeImage(src: string): Promise<boolean> {
   return new Promise((resolve) => {
     const img = new Image();
@@ -72,6 +74,7 @@ async function findSiteImage(url: string): Promise<string | undefined> {
   return undefined;
 }
 
+/* ---------- UI ---------- */
 function TagPill({ tag, onClick, onRemove, asButton = true }: { tag: string; onClick?: () => void; onRemove?: () => void; asButton?: boolean }) {
   const bg = ensureContrastBgForWhite(colorForTag(tag));
   const El: any = asButton ? 'button' : 'span';
@@ -91,8 +94,11 @@ function useNotes() {
 
 /* ---------- TOP BAR ---------- */
 function TopBar({
-  notes, selected, setSelected, draftOpen, onAddTagToDraftAndFilter
-}: { notes: Note[]; selected: string[]; setSelected: (tags: string[]) => void; draftOpen: boolean; onAddTagToDraftAndFilter: (t: string) => void; }) {
+  notes, selected, setSelected, draftOpen, onAddTagToDraftAndFilter, onToggleInfo
+}: {
+  notes: Note[]; selected: string[]; setSelected: (tags: string[]) => void; draftOpen: boolean;
+  onAddTagToDraftAndFilter: (t: string) => void; onToggleInfo: () => void;
+}) {
   const [input, setInput] = useState('');
   const baseScores = useMemo(() => tagBaseScores(notes), [notes]);
   const allTags = useMemo(() => Object.keys(baseScores), [baseScores]);
@@ -120,8 +126,7 @@ function TopBar({
   function onEnter() {
     const top = (typeahead[0] || input.trim());
     if (!top) return;
-    if (draftOpen) onAddTagToDraftAndFilter(top);
-    else toggleFilterTag(top);
+    if (draftOpen) onAddTagToDraftAndFilter(top); else toggleFilterTag(top);
     setInput('');
   }
 
@@ -129,10 +134,17 @@ function TopBar({
     <div className="topbar">
       <div className="topbar-inner">
         <div className="row" style={{ gap: 10 }}>
+          {/* versjonsknapp / logo */}
+          <button className="logo-btn" onClick={onToggleInfo} title="Info">
+            <img className="logo-img" src={LOGO_PATH} alt="Storm" />
+          </button>
+
+          {/* valgte filtertagger */}
           {selected.map(t => (
             <TagPill key={t} tag={t} onClick={() => toggleFilterTag(t)} onRemove={() => toggleFilterTag(t)} />
           ))}
-          <img className="logo-img" src={LOGO_PATH} alt="Storm" />
+
+          {/* søk/legg til */}
           <input
             className="input"
             placeholder={draftOpen ? 'Legg til tagg i notat…' : 'Søk/velg tagg…'}
@@ -141,6 +153,8 @@ function TopBar({
             onKeyDown={(e) => { if (e.key === 'Enter') onEnter(); }}
             autoCapitalize="none" autoCorrect="off" spellCheck={false}
           />
+
+          {/* tøm filter */}
           {selected.length > 0 && (
             <button className="icon-btn" onClick={() => setSelected([])} title="Tøm filter" aria-label="Tøm filter">
               <Eraser color="var(--iconB)" strokeWidth={2.5} />
@@ -148,6 +162,7 @@ function TopBar({
           )}
         </div>
 
+        {/* én linje – horisontal scroll */}
         <div className="topbar-tags">
           {(input ? typeahead : ranked).map(t => (
             <TagPill key={t} tag={t} onClick={() => { draftOpen ? onAddTagToDraftAndFilter(t) : toggleFilterTag(t); if (input) setInput(''); }} />
@@ -175,7 +190,8 @@ function ReadCard({ note, onEdit, onClickTag }: { note: Note; onEdit: () => void
           {note.title && <h3>{note.title}</h3>}
           {bodyPreview && <p>{linkify(bodyPreview)}</p>}
         </div>
-        {(note.imageUrl || note.image) && <img className="thumb" src={note.imageUrl || note.image!} alt="" />}
+        {(note as any).imageUrl && <img className="thumb" src={(note as any).imageUrl} alt="" />}
+        {note.image && !((note as any).imageUrl) && <img className="thumb" src={note.image} alt="" />}
       </div>
       <div className="small">Oppdatert: {new Date(note.updatedAt || note.createdAt).toLocaleString()}</div>
     </div>
@@ -184,16 +200,16 @@ function ReadCard({ note, onEdit, onClickTag }: { note: Note; onEdit: () => void
 
 /* ---------- REDIGERINGSKORT ---------- */
 function EditCard({
-  note, onSave, onDelete, onCancel, onAddFilterTag
+  note, onSave, onSaveDraft, onDelete, onCancel, onAddFilterTag
 }: {
-  note: Note; onSave: (n: Note) => void; onDelete: (id: string) => void; onCancel: () => void; onAddFilterTag: (t: string) => void;
+  note: Note; onSave: (n: Note) => void; onSaveDraft: (n: Note) => void; onDelete: (id: string) => void; onCancel: () => void; onAddFilterTag: (t: string) => void;
 }) {
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const [body, setBody] = useState(note.body);
   const [tags, setTags] = useState<string[]>(note.tags);
   const [tagInput, setTagInput] = useState('');
   const [image, setImage] = useState<string | undefined>(note.image);
-  const [imageUrl] = useState<string | undefined>(note.imageUrl);
+  const [imageUrl] = useState<string | undefined>((note as any).imageUrl);
 
   const textRef = useRef<HTMLTextAreaElement | null>(null);
   const caretRef = useRef<number>(0);
@@ -206,7 +222,6 @@ function EditCard({
   const title = useMemo(() => computedTitleFromBody(body), [body]);
   const textTokens = useMemo(() => extractTokens(body), [body]);
 
-  // kjente tagger (alle – minus de som allerede er i notatet)
   const knownTags = useMemo(() => {
     const s = new Set<string>();
     try {
@@ -231,14 +246,14 @@ function EditCard({
   };
 
   function addTag(t: string) {
-    const clean = t.trim().toLowerCase(); // normaliser
+    const clean = t.trim().toLowerCase();
     if (!clean) return;
     if (tags.includes(clean)) return;
     const winY = window.scrollY;
     const caret = caretRef.current;
     setTags(prev => [...prev, clean]);
     setTagInput('');
-    onAddFilterTag(clean); // legg også i top-filter
+    onAddFilterTag(clean);
     setTimeout(() => {
       const ta = textRef.current;
       if (ta) { ta.focus(); try { ta.setSelectionRange(caret, caret); } catch {} }
@@ -250,30 +265,29 @@ function EditCard({
   function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]; if (!f) return;
     const reader = new FileReader();
-    reader.onload = () => { setImage(String(reader.result)); };
+    reader.onload = () => {
+      setImage(String(reader.result));
+      // lagre som utkast (ikke lukk)
+      onSaveDraft({ ...note, body, title, tags, image: String(reader.result), updatedAt: Date.now() });
+    };
     reader.onerror = () => {};
     reader.readAsDataURL(f);
     e.target.value = '';
   }
 
-  function persist() {
-    onSave({ ...note, body, title, tags, image, imageUrl, updatedAt: Date.now() });
+  function saveDraft() {
+    onSaveDraft({ ...note, body, title, tags, image, updatedAt: Date.now() });
+  }
+  function saveAndClose() {
+    onSave({ ...note, body, title, tags, image, updatedAt: Date.now() });
   }
 
+  // kun før vi forlater siden: lagre utkast (ikke lukk)
   useEffect(() => {
-    const handler = () => { persist(); };
-    const vis = () => { if (document.hidden) persist(); };
+    const handler = () => { saveDraft(); };
     window.addEventListener('beforeunload', handler);
-    window.addEventListener('pagehide', handler);
-    window.addEventListener('blur', handler);
-    document.addEventListener('visibilitychange', vis);
-    return () => {
-      window.removeEventListener('beforeunload', handler);
-      window.removeEventListener('pagehide', handler);
-      window.removeEventListener('blur', handler);
-      document.removeEventListener('visibilitychange', vis);
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => window.removeEventListener('beforeunload', handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [body, tags, image, title]);
 
   const [cursorWord, setCursorWord] = useState<string | null>(null);
@@ -352,7 +366,7 @@ function EditCard({
         </button>
       </div>
 
-      {/* Skjult fil-input + knapp (robust på mobil) */}
+      {/* Skjult fil-input + knapp */}
       <input ref={fileRef} type="file" accept="image/*" onChange={onPickFile} style={{ display: 'none' }} />
       <div className="edit-actions">
         <div style={{ display: 'flex', gap: 8 }}>
@@ -365,7 +379,7 @@ function EditCard({
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="icon-btn" onClick={onCancel} title="Lukk" aria-label="Lukk"><X color="var(--iconB)" strokeWidth={2.5} /></button>
-          <button className="icon-btn" onClick={persist} title="Lagre" aria-label="Lagre"><Check color="var(--iconB)" strokeWidth={2.5} /></button>
+          <button className="icon-btn" onClick={saveAndClose} title="Lagre" aria-label="Lagre"><Check color="var(--iconB)" strokeWidth={2.5} /></button>
         </div>
       </div>
     </div>
@@ -377,10 +391,10 @@ export default function App() {
   const { notes, setNotes } = useNotes();
   const [selected, setSelected] = useState<string[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [showInfo, setShowInfo] = useState(false);
 
   const { direct, related } = useMemo(() => directAndRelatedNotes(notes, selected), [notes, selected]);
 
-  // eldst -> nyest (nyest nederst)
   const baseAsc = useMemo(
     () => notes.slice().sort((a,b)=> (a.updatedAt||a.createdAt)-(b.updatedAt||b.createdAt)),
     [notes]
@@ -388,8 +402,10 @@ export default function App() {
 
   const visible = useMemo(() => {
     if (selected.length === 0) return baseAsc;
-    const relatedAsc = related.map(x => x.note).sort((a,b)=> (a.updatedAt||a.createdAt)-(b.updatedAt||b.createdAt));
-    const directAsc = direct.slice().sort((a,b)=> (a.updatedAt||a.createdAt)-(b.updatedAt||b.createdAt));
+    const relatedAsc = related.map(x => x.note)
+      .sort((a,b)=> (a.updatedAt||a.createdAt)-(b.updatedAt||b.createdAt));
+    const directAsc = direct.slice()
+      .sort((a,b)=> (a.updatedAt||a.createdAt)-(b.updatedAt||b.createdAt));
     return [...relatedAsc, ...directAsc];
   }, [baseAsc, direct, related, selected]);
 
@@ -401,18 +417,23 @@ export default function App() {
       body: initial?.body ?? '',
       tags: (initial?.tags as string[])?.slice?.() ?? selected.slice(),
       image: initial?.image,
-      imageUrl: initial?.imageUrl,
+      // @ts-ignore - imageUrl optional in some setups
+      imageUrl: (initial as any)?.imageUrl,
       createdAt: now,
       updatedAt: now
     };
-    setNotes(prev => [...prev, n]); // nederst
+    setNotes(prev => [...prev, n]);
     setEditingId(n.id);
-    setTimeout(() => {
-      const el = document.querySelector(`[data-note-id="${n.id}"]`);
-      (el as HTMLElement | null)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }, 0);
   }
-  function saveNote(n: Note) { setNotes(prev => prev.map(x => x.id === n.id ? n : x)); setEditingId(null); }
+
+  function saveNote(n: Note) {
+    setNotes(prev => prev.map(x => x.id === n.id ? n : x));
+    setEditingId(null); // manuelt lagre lukker
+  }
+  function saveNoteDraft(n: Note) {
+    setNotes(prev => prev.map(x => x.id === n.id ? n : x));
+    // behold redigeringen åpen
+  }
   function deleteNote(id: string) { setNotes(prev => prev.filter(n => n.id !== id)); setEditingId(null); }
 
   function scrollBottom() {
@@ -453,6 +474,7 @@ export default function App() {
       const body = [title, lines.join('\n'), url].filter(Boolean).join('\n\n').trim();
       let imageUrl: string | undefined = undefined;
       if (url) imageUrl = await findSiteImage(url);
+      // @ts-ignore
       addNote({ body, imageUrl });
       history.replaceState(null, '', '/');
       scrollBottom();
@@ -468,7 +490,22 @@ export default function App() {
         setSelected={setSelected}
         draftOpen={!!editingId}
         onAddTagToDraftAndFilter={addTagToDraftAndFilter}
+        onToggleInfo={() => setShowInfo(v => !v)}
       />
+
+      {/* liten infoboks */}
+      {showInfo && (
+        <div className="infobox" onClick={() => setShowInfo(false)}>
+          <div className="infobox-inner">
+            <div className="row" style={{ alignItems: 'center', gap: 8 }}>
+              <Info size={18} />
+              <strong>Storm</strong>
+              <span>v{VERSION}</span>
+            </div>
+            <div className="small" style={{ marginTop: 6 }}>Trykk hvor som helst for å lukke.</div>
+          </div>
+        </div>
+      )}
 
       <div className="container">
         <div className="feed">
@@ -478,6 +515,7 @@ export default function App() {
                 <EditCard
                   note={n}
                   onSave={saveNote}
+                  onSaveDraft={saveNoteDraft}
                   onDelete={deleteNote}
                   onCancel={() => setEditingId(null)}
                   onAddFilterTag={(t) => { const tag = t.toLowerCase(); setSelected(prev => prev.includes(tag) ? prev : [...prev, tag]); scrollBottom(); }}
