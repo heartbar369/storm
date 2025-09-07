@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+// legg til denne (type-import):
+import type { Dispatch, SetStateAction } from 'react';
+
 import './index.css';
 import type { Note } from './lib/types';
 import { computedTitleFromBody } from './lib/text';
@@ -98,7 +101,7 @@ function useNotes() {
 function TopBar({
   notes, selected, setSelected, draftOpen, onAddTagToDraftAndFilter, onToggleInfo
 }: {
-  notes: Note[]; selected: string[]; setSelected: (tags: string[]) => void; draftOpen: boolean;
+  notes: Note[]; selected: string[]; setSelected: React.Dispatch<React.SetStateAction<string[]>>; draftOpen: boolean;
   onAddTagToDraftAndFilter: (t: string) => void; onToggleInfo: () => void;
 }) {
   const [input, setInput] = useState('');

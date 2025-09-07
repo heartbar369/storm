@@ -3,10 +3,11 @@
   --fg:#e5e7eb;
   --muted:#2b3344;
   --panel:#111827;
-  --iconA:#1d1a7e;
+  --iconA:#1d1a7e;  /* ikonfarger */
   --iconB:#ffc83d;
   --accent:#334155;
-  --topbar-h:68px;
+  --topbar-h:68px;          /* høyde på første rad i topbar */
+  --topbar-extra:56px;      /* plass til forslag-raden + litt luft */
 }
 
 *{box-sizing:border-box}
@@ -18,23 +19,24 @@ body{
   font:14px/1.5 system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
 }
 
-.app{min-height:100%;padding-top:var(--topbar-h);}
+/* Viktig: gi plass til HELE topbaren (to rader) */
+.app{min-height:100%;padding-top:calc(var(--topbar-h) + var(--topbar-extra));}
 .container{max-width:920px;margin:0 auto;padding:10px 12px;}
 .row{display:flex;gap:8px;align-items:center;}
 .small{opacity:.75;font-size:12px}
 
-/* ---------- topbar (fixert) ---------- */
+/* ---------- topbar (fast) ---------- */
 .topbar{
-  position:fixed;top:0;left:0;right:0;height:var(--topbar-h);
-  background:rgba(10,15,25,.9);
+  position:fixed;top:0;left:0;right:0;height:auto;
+  background:rgba(10,15,25,.94);
   backdrop-filter: blur(8px);
   border-bottom:1px solid var(--muted);
   z-index:10;
+  box-shadow: 0 8px 14px rgba(0,0,0,.32); /* gjør overgang tydeligere */
 }
 .topbar-inner{
-  height:100%;
   display:flex;flex-direction:column;justify-content:center;
-  max-width:920px;margin:0 auto;padding:6px 12px;
+  max-width:920px;margin:0 auto;padding:6px 12px 10px; /* litt ekstra luft nederst */
 }
 .logo-btn{display:flex;align-items:center;justify-content:center;border:none;background:transparent;padding:0;cursor:pointer}
 .logo-img{width:28px;height:28px;border-radius:8px;border:1px solid var(--muted)}
@@ -48,11 +50,15 @@ body{
   background:#0f172a;cursor:pointer;
 }
 
-/* én linje – horisontal scroll for forslag/tagger */
-.topbar-tags{
-  margin-top:6px;display:flex;gap:6px;overflow:auto;white-space:nowrap;scrollbar-width:none;
+/* én linje – horisontal scroll for lister i topbar */
+.topbar-tags,
+.topbar-suggest-list{
+  margin-top:6px;
+  margin-bottom:10px;           /* LUFT under forslagene */
+  display:flex;gap:8px;overflow:auto;white-space:nowrap;scrollbar-width:none;
 }
-.topbar-tags::-webkit-scrollbar{display:none}
+.topbar-tags::-webkit-scrollbar,
+.topbar-suggest-list::-webkit-scrollbar{display:none}
 
 /* ---------- feed & cards ---------- */
 .feed{
@@ -75,57 +81,59 @@ body{
 .text p{margin:6px 0 0}
 h3{margin:0 0 4px;font-size:16px}
 
-/* tagger */
-.tags{display:flex;flex-wrap:wrap;gap:6px}
+/* ---------- tagger ---------- */
+.tags{display:flex;flex-wrap:wrap;gap:8px}
 .tagpill{
   display:inline-flex;
   align-items:center;
   gap:6px;
   border:none;
   border-radius:999px;
-  padding:6px 12px;     /* større chip-størrelse */
+  padding:6px 12px;   /* basisstørrelse */
   font-weight:600;
   color:#fff;
   cursor:pointer;
+  line-height:1;
+  min-height:34px;
 }
 .tagpill .x{margin-left:4px;opacity:.9}
 .tagpill .x:hover{opacity:1}
 
-/* forslag-linjer (topbar og i notat) */
-.suggestion-fixed,.tag-suggestion-list,.topbar-suggest-list,.topbar-tags{
-  display:flex;gap:6px;overflow:auto;white-space:nowrap;scrollbar-width:none
-}
-.suggestion-fixed::-webkit-scrollbar,
-.tag-suggestion-list::-webkit-scrollbar,
-.topbar-suggest-list::-webkit-scrollbar,
-.topbar-tags::-webkit-scrollbar{display:none}
-
-/* gjør topbar-forslag like store som valgte tagger */
+/* STORE forslag i top-baren (samme størrelse som valgte) */
 .topbar-tags .tagpill,
 .topbar-suggest-list .tagpill{
-  padding:6px 12px;
+  padding:8px 14px;   /* større enn basis */
+  min-height:36px;
   font-weight:600;
 }
 
-/* nøytral chip for helt nye (ukjente) forslag i editor */
+/* nøytral chip (brukes for helt nye forslag i editor) */
+.suggestion-fixed,.tag-suggestion-list,.topbar-suggest-list,.topbar-tags{
+  display:flex;gap:8px;overflow:auto;white-space:nowrap;scrollbar-width:none
+}
+.suggestion-fixed::-webkit-scrollbar,
+.tag-suggestion-list::-webkit-scrollbar{display:none}
+
 .suggestion-pill{
   background:transparent;
   color:#fff;
   border:2px solid #ffffff55; /* tydelig hvit kant */
   border-radius:999px;
-  padding:6px 12px;           /* match tagpill */
+  padding:8px 14px;
   font-weight:600;
   cursor:pointer;
+  line-height:1;
+  min-height:36px;
 }
 
-/* editor */
+/* ---------- editor ---------- */
 .edit-actions{display:flex;justify-content:space-between;align-items:center;margin-top:4px}
 textarea{
   width:100%;min-height:140px;background:#0f172a;border:1px solid var(--muted);color:var(--fg);
   border-radius:10px;outline:none;padding:10px;resize:vertical;
 }
 
-/* FAB – midtstilt nederst */
+/* ---------- FAB – midtstilt nederst ---------- */
 .fab{
   position:fixed;
   left:50%; transform:translateX(-50%);
@@ -137,7 +145,7 @@ textarea{
 
 /* infobox (versjon) */
 .infobox{
-  position:fixed;top:68px;left:0;right:0;display:flex;justify-content:center;z-index:20;
+  position:fixed;top:calc(var(--topbar-h) + 8px);left:0;right:0;display:flex;justify-content:center;z-index:20;
 }
 .infobox-inner{
   background:#0f172a;border:1px solid var(--muted);border-radius:12px;padding:10px 12px;min-width:220px;
