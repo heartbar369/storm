@@ -23,7 +23,7 @@ body{
 .row{display:flex;gap:8px;align-items:center;}
 .small{opacity:.75;font-size:12px}
 
-/* ---------- topbar ---------- */
+/* ---------- topbar (fixert) ---------- */
 .topbar{
   position:fixed;top:0;left:0;right:0;height:var(--topbar-h);
   background:rgba(10,15,25,.9);
@@ -55,12 +55,23 @@ body{
 .topbar-tags::-webkit-scrollbar{display:none}
 
 /* ---------- feed & cards ---------- */
-.feed{display:flex;flex-direction:column;gap:12px;}
+.feed{
+  display:flex;flex-direction:column;gap:12px;
+  padding-bottom: 96px; /* buffer under siste kort for FAB */
+}
+.feed::after{content:"";display:block;height:8px;}
+
 .card,.editcard{
   background:var(--panel);border:1px solid var(--muted);border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:8px;
 }
-.card-row{display:flex;gap:12px;align-items:flex-start}
-.thumb{width:96px;height:96px;object-fit:cover;border-radius:10px;border:1px solid var(--muted)}
+.card-row{
+  display:flex;gap:12px;align-items:flex-start;
+}
+.thumb{
+  width:96px;height:96px;object-fit:cover;border-radius:10px;border:1px solid var(--muted);
+  margin-left:auto;               /* høyrestill bildet i kortet */
+  align-self:flex-start;
+}
 .text p{margin:6px 0 0}
 h3{margin:0 0 4px;font-size:16px}
 
@@ -73,24 +84,36 @@ h3{margin:0 0 4px;font-size:16px}
   border:none;
   border-radius:999px;
   padding:6px 12px;     /* større chip-størrelse */
-  font-weight:600;      /* matcher valgte tagger */
+  font-weight:600;
   color:#fff;
   cursor:pointer;
 }
 .tagpill .x{margin-left:4px;opacity:.9}
 .tagpill .x:hover{opacity:1}
 
-/* forslag-linjer */
-.suggestion-fixed,.tag-suggestion-list{
+/* forslag-linjer (topbar og i notat) */
+.suggestion-fixed,.tag-suggestion-list,.topbar-suggest-list,.topbar-tags{
   display:flex;gap:6px;overflow:auto;white-space:nowrap;scrollbar-width:none
 }
-.suggestion-fixed::-webkit-scrollbar,.tag-suggestion-list::-webkit-scrollbar{display:none}
+.suggestion-fixed::-webkit-scrollbar,
+.tag-suggestion-list::-webkit-scrollbar,
+.topbar-suggest-list::-webkit-scrollbar,
+.topbar-tags::-webkit-scrollbar{display:none}
+
+/* gjør topbar-forslag like store som valgte tagger */
+.topbar-tags .tagpill,
+.topbar-suggest-list .tagpill{
+  padding:6px 12px;
+  font-weight:600;
+}
+
+/* nøytral chip for helt nye (ukjente) forslag i editor */
 .suggestion-pill{
   background:transparent;
   color:#fff;
   border:2px solid #ffffff55; /* tydelig hvit kant */
   border-radius:999px;
-  padding:6px 12px;           /* harmoniser med tagpill */
+  padding:6px 12px;           /* match tagpill */
   font-weight:600;
   cursor:pointer;
 }
@@ -102,10 +125,14 @@ textarea{
   border-radius:10px;outline:none;padding:10px;resize:vertical;
 }
 
-/* FAB */
+/* FAB – midtstilt nederst */
 .fab{
-  position:fixed;right:16px;bottom:16px;width:56px;height:56px;border-radius:16px;border:1px solid var(--muted);
+  position:fixed;
+  left:50%; transform:translateX(-50%);
+  bottom:16px;
+  width:56px;height:56px;border-radius:16px;border:1px solid var(--muted);
   background:#0f172a;box-shadow:0 4px 18px rgba(0,0,0,.35);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;
+  z-index:11;
 }
 
 /* infobox (versjon) */
